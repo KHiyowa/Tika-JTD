@@ -55,17 +55,37 @@ class JtdParser : AbstractParser() {
         // 4. 形式に応じて平文をサルベージする。
         val plainText = extractPlainText(data, format)
 
+        // P-H+F: /Header のヘッダ本文（本文テキストを出す直前に取得）。
+        // ヘッダなし・全空・読取失敗 → null（本文のみの従来出力を維持するゲート）。
+        // TODO(Step4b): LayoutBoxText の後付け連結は次ステップ。
+        val headerText = readHeaderTextOrNull(data)
+
         // 5. SAX 出力（XHTML）。
         // TODO(Step4): 段落分割・table・ruby の構造化。ここでは平文を一字一句そのまま body に載せる簡易版。
         val xhtml = XHTMLContentHandler(contentHandler, metadata)
         xhtml.startDocument()
         xhtml.startElement("body")
         if (plainText.isNotEmpty()) {
-            xhtml.characters(plainText)
+            // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文（1つのテキストノードとして連結）。
+            xhtml.characters(
+                if (headerText != null) "$headerText\n\n$plainText" else plainText,
+            )
         }
         xhtml.endElement("body")
         xhtml.endDocument()
     }
+
+    /**
+     * /Header の復元テキスト全体（行を改行で結合）を返す。
+     * 欠落・レイアウト不符・読取失敗はすべて null（本文のみの従来出力ゲート。
+     * ここではいかなる例外も出力チェーンに持ち込まない）。
+     */
+    private fun readHeaderTextOrNull(data: ByteArray): String? =
+        try {
+            HeaderTextReader.readHeaderText(data)?.text()
+        } catch (e: Exception) {
+            null
+        }
 
     /**
      * 形式ごとに DocumentText を読み出して平文化する。

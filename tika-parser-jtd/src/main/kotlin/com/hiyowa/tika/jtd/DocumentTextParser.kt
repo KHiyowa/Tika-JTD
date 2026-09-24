@@ -73,8 +73,8 @@ object DocumentTextParser {
         // 混在型（P1）: 最初のマーカーより手前の raw 前置きを、後続マーカー本文より前で
         // TextRun として1つ emit する。マーカー型ファイル（前置き空・printable なし）は
         // 発火せず、通常のマーカー走査のみで現状と同一の出力を作る（リグレッションガード）。
-        decodeRawPrologue(data, units)?.let { (prologue, _) ->
-            elements.add(DocumentTextElement.TextRun(prologue))
+        decodeRawPrologue(data, units)?.let { decoded ->
+            elements.add(DocumentTextElement.TextRun(decoded.text))
             hasProse = true
         }
 
@@ -149,6 +149,73 @@ object DocumentTextParser {
      */
     fun extractDocumentText(data: ByteArray): String = parseDocumentText(data).plainText()
 
+    /**
+     * [decodePrologueUnits] の返り値（Rust `decode_prologue_units` の tuple 返しを
+     * 名前付きフィールドに整形）。モジュール内（[HeaderTextReader] 等）で共用する。
+     */
+    data class DecodedPrologue(val text: String, val boundary: Int)
+
+    /**
+     * units[start..end) 内の最初の RFC 0009 マーカー（0x001c/0x001d/0x001f）の位置。
+     * span 全体がマーカーレスの場合は null（先頭 raw 経路の管轄）。
+     * 移植元 Rust の `pub(crate) fn first_text_marker` 相当。
+     */
+    internal fun firstTextMarker(units: IntArray, start: Int, end: Int): Int? {
+        for (i in start until end) {
+            if (units[i] == DocumentTextConstants.RECORD_START_MARKER ||
+                units[i] == DocumentTextConstants.INLINE_TEXT_START ||
+                units[i] == DocumentTextConstants.TEXT_RUN_MARKER
+            ) {
+                return i
+            }
+        }
+        return null
+    }
+
+    /** [firstTextMarker] の [List] ベースオーバーロード（Header テキスト等の List 語列利用者向け）。 */
+    internal fun firstTextMarker(units: List<Int>, start: Int, end: Int): Int? =
+        firstTextMarker(units.toIntArray(), start, end)
+
+    /**
+     * units[start..end) を UTF-16BE 生の text として通読する。
+     * CR(0x000d)/LF(0x000a) は行区切りとして保持、0x0000 は連続パディングとしてスキップ
+     * （打ち切りではない）、それ以外の制御境界・無効スカラーで読みを打ち切る。
+     * 少なくとも1語読めば (テキスト, 打ち切り unit 位置) を、空なら null を返す。
+     * 移植元 Rust の `pub(crate) fn decode_prologue_units` 相当。
+     */
+    internal fun decodePrologueUnits(units: IntArray, start: Int, end: Int): DecodedPrologue? {
+        val text = StringBuilder()
+        var index = start
+        while (index < end) {
+            val code = units[index]
+            when (code) {
+                0x0000 -> {
+                    index++
+                    continue
+                }
+                0x000d -> {
+                    text.append('\r')
+                    index++
+                    continue
+                }
+                0x000a -> {
+                    text.append('\n')
+                    index++
+                    continue
+                }
+                else -> Unit
+            }
+            if (isInvalidScalar(code) || isControlBoundary(code)) break
+            text.append(code.toChar())
+            index++
+        }
+        return if (text.isEmpty()) null else DecodedPrologue(text.toString(), index)
+    }
+
+    /** [decodePrologueUnits] の [List] ベースオーバーロード（Header テキスト等の List 語列利用者向け）。 */
+    internal fun decodePrologueUnits(units: List<Int>, start: Int, end: Int): DecodedPrologue? =
+        decodePrologueUnits(units.toIntArray(), start, end)
+
     // ------------------------------------------------------------------
     // raw text 経路（SsmgV.01 / TextV.01）
     // ------------------------------------------------------------------
@@ -212,7 +279,7 @@ object DocumentTextParser {
     // P1 仕様: TextV.01 span の最初のマーカーより手前の UTF-16BE 生の
     // 前置き本文を raw デコードする。発火条件をすべて満たすとき (前置き文字列, 終端 unit)
     // を返し、それ以外は null（マーカー型ファイルは出力が変わらない）。
-    private fun decodeRawPrologue(data: ByteArray, units: IntArray): Pair<String, Int>? {
+    private fun decodeRawPrologue(data: ByteArray, units: IntArray): DecodedPrologue? {
         if (!isTextv01Segment(data) || units.size < 16 || units[14] != 0x0000) return null
         val spanLength = units[15]
         if (spanLength == 0 || spanLength > units.size - 16) return null
@@ -230,53 +297,6 @@ object DocumentTextParser {
         }
         if (!hasPrintable) return null
         return decodePrologueUnits(units, start, marker)
-    }
-
-    // units[start..end) 内の最初の RFC 0009 マーカー（0x001c/0x001d/0x001f）の位置。
-    // span 全体がマーカーレスの場合は null（先頭 raw 経路の管轄）。
-    private fun firstTextMarker(units: IntArray, start: Int, end: Int): Int? {
-        for (i in start until end) {
-            if (units[i] == DocumentTextConstants.RECORD_START_MARKER ||
-                units[i] == DocumentTextConstants.INLINE_TEXT_START ||
-                units[i] == DocumentTextConstants.TEXT_RUN_MARKER
-            ) {
-                return i
-            }
-        }
-        return null
-    }
-
-    // units[start..end) を UTF-16BE 生の text として通読する。
-    // CR(0x000d)/LF(0x000a) は行区切りとして保持、0x0000 は連続パディングとしてスキップ
-    // （打ち切りではない）、それ以外の制御境界・無効スカラーで読みを打ち切る。
-    // 少なくとも1語読めば (テキスト, 打ち切り unit 位置) を、空なら null を返す。
-    private fun decodePrologueUnits(units: IntArray, start: Int, end: Int): Pair<String, Int>? {
-        val text = StringBuilder()
-        var index = start
-        while (index < end) {
-            val code = units[index]
-            when (code) {
-                0x0000 -> {
-                    index++
-                    continue
-                }
-                0x000d -> {
-                    text.append('\r')
-                    index++
-                    continue
-                }
-                0x000a -> {
-                    text.append('\n')
-                    index++
-                    continue
-                }
-                else -> Unit
-            }
-            if (isInvalidScalar(code) || isControlBoundary(code)) break
-            text.append(code.toChar())
-            index++
-        }
-        return if (text.isEmpty()) null else Pair(text.toString(), index)
     }
 
     // ------------------------------------------------------------------
