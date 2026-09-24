@@ -1,5 +1,7 @@
 package com.hiyowa.tika.jtd
 
+import java.io.ByteArrayOutputStream
+import org.apache.poi.poifs.filesystem.POIFSFileSystem
 import kotlin.math.max
 import kotlin.math.min
 
@@ -14,12 +16,16 @@ import kotlin.math.min
  *   → [parseRawTextSegment]（先頭 raw 経路、0x001f 不要）
  * - 混在型（P1）プロローグの raw 先行エミット（[decodeRawPrologue]）
  * - マーカー走査（0x001f run 開始判定・0x001d インライン開始・0x001e 終端・制御境界）
+ * - [readDocumentTextPayload]（3 経路フォールバック: /DocumentText → /JSCompDocument
+ *   展開 → 埋め込みスキャン）と [embeddedDocumentText]（SsmgV.01 全出現位置からの
+ *   fragment 回収 + 尤度フィル）
  *
  * 未移植（Rust 版との意図的な差分）:
  * - TODO(Step5): ルビ promotion・自動番号付け（NumberingState / paragraph_header_prefix）・
  *   trim_trailing_exposed_controls（末尾露出制御文字トリム）
- * - TODO(Step-budget): _with_limits / _with_budget バリアント（Rust の
- *   [DecompressionBudget] と等価なメモリ予算機構は後続 Step で導入予定）
+ * - [hasEmbeddedDocumentText] は Rust の完全解析成功ベース（`has_embedded_document_text`）ではなく、
+ *   検出パスの効率化のためマジック候補存在チェックの軽量版（完全解析は
+ *   [readDocumentTextPayload] が担当）
  * - map_document_text（位置ミラー）は Step 2b で分離移植
  */
 object DocumentTextParser {
@@ -148,6 +154,218 @@ object DocumentTextParser {
      * DocumentText ストリームから平文を抽出する。Rust `extract_document_text` と同一。
      */
     fun extractDocumentText(data: ByteArray): String = parseDocumentText(data).plainText()
+
+    // ------------------------------------------------------------------
+    // Payload 読み出し（3 経路フォールバック / 埋め込みスキャン）
+    // 移植元: Rust `read_document_text_payload_with_budget` /
+    // `read_compressed_or_embedded_document_text` / `embedded_document_text` /
+    // `clean_embedded_text` / `is_plausible_embedded_line` / `is_plausible_embedded_character` /
+    // `find_document_text_magic_offsets`（document_text.rs）
+    // ------------------------------------------------------------------
+
+    // 埋め込み DocumentText の 1 候補あたりの走査スパン上限。document_text.rs:11 と同一値。
+    private const val EMBEDDED_DOCUMENT_TEXT_MAX_SPAN = 64 * 1024
+
+    // 埋め込み尤度判定の対象外になる CJK 補助記号群。document_text.rs:442-469 の
+    // matches! 文字列集合と同一（一部は上述のコードポイント範囲と重複するが、
+    // 移植元をそのまま反映した形にするため維持）。
+    private val EMBEDDED_PLAUSIBLE_EXTRA_CHARACTERS: Set<Char> = setOf(
+        '、', '。', '・', '「', '」', '『', '』', '【', '】', '（', '）', '［', '］',
+        '→', '←', '↑', '↓', '～', '…', '◎', '○', '●', '◆', '☆', '★', '※',
+    )
+
+    /**
+     * DocumentText をデフォルト上限で読み出す。Rust `read_document_text_payload` 相当。
+     *
+     * 見つからない場合は [NotFoundException] をスローする
+     * （Rust の `Error::NotFound("stream \`/DocumentText\`")` 相当）。
+     */
+    fun readDocumentTextPayload(data: ByteArray): DocumentTextPayload {
+        val budget = ParseLimits.DEFAULT.decompressionBudget()
+        return readDocumentTextPayloadWithBudget(data, budget)
+    }
+
+    /**
+     * 共有 [DecompressionBudget] で DocumentText を読み出す。
+     * Rust `read_document_text_payload_with_budget` と同一の 3 経路フォールバック:
+     * 1. `/DocumentText` が直接読める
+     * 2. `/JSCompDocument` が JustCompressedDocument → 展開 → 内部 CFB を再度開封して `/DocumentText`
+     * 3. バイト列全体の埋め込みスキャン（[embeddedDocumentText]）
+     *
+     * 1 と 2 の CFS 読み出しは同一の [POIFSFileSystem] を再利用し、
+     * 同一コンテナを二度開かない（内部 CFB は別コンテナなので改めて開く）。
+     */
+    internal fun readDocumentTextPayloadWithBudget(data: ByteArray, budget: DecompressionBudget): DocumentTextPayload {
+        budget.checkInputSize(data.size.toLong())
+        // 外部 CFB を一回だけ開く（経路 1・2 の読み出しを共有）
+        val fs = JtdContainerReader.open(data)
+        try {
+            val stream = JtdContainerReader.readStream(fs, DocumentTextConstants.DOCUMENT_TEXT_PATH)
+            return if (stream != null) {
+                DocumentTextPayload(
+                    DocumentTextConstants.DOCUMENT_TEXT_PATH,
+                    stream,
+                    parseDocumentText(stream).plainText(),
+                )
+            } else {
+                readCompressedOrEmbeddedDocumentText(data, fs, budget)
+            }
+        } finally {
+            fs.close()
+        }
+    }
+
+    /**
+     * 経路 2・3。`/JSCompDocument` がなければ（または JustCompressedDocument でなければ）
+     * 埋め込みスキャンへフォールバックする。Rust `read_compressed_or_embedded_document_text` 相当。
+     */
+    private fun readCompressedOrEmbeddedDocumentText(
+        data: ByteArray,
+        fs: POIFSFileSystem,
+        budget: DecompressionBudget,
+    ): DocumentTextPayload {
+        val jsCompDocument = JtdContainerReader.readStream(fs, DocumentTextConstants.COMPRESSED_DOCUMENT_PATH)
+            ?: return readEmbeddedDocumentText(data)
+        if (!JustCompressedDocument.isJustCompressedDocument(jsCompDocument)) {
+            return readEmbeddedDocumentText(data)
+        }
+
+        val innerDocument = JustCompressedDocument.decompressWithBudget(jsCompDocument, budget)
+        // 内部 CFB は外部コンテナとは別物なので、ここで初めて開く（same-container 二度開きではない）。
+        val innerBytes = JtdContainerReader.withFileSystem(innerDocument) { innerFs ->
+            JtdContainerReader.readStream(innerFs, DocumentTextConstants.DOCUMENT_TEXT_PATH)
+                ?: throw NotFoundException("stream `${DocumentTextConstants.DOCUMENT_TEXT_PATH}`")
+        }
+        return DocumentTextPayload(
+            DocumentTextConstants.DOCUMENT_TEXT_PATH,
+            innerBytes,
+            parseDocumentText(innerBytes).plainText(),
+        )
+    }
+
+    /**
+     * 埋め込みスキャン結果から Payload を作る。Rust `read_embedded_document_text` 相当。
+     * 有効な fragment が一つもなければ [NotFoundException]（Rust の NotFound 伝播と同一）。
+     */
+    private fun readEmbeddedDocumentText(data: ByteArray): DocumentTextPayload =
+        embeddedDocumentText(data)
+            ?: throw NotFoundException("stream `${DocumentTextConstants.DOCUMENT_TEXT_PATH}`")
+
+    /**
+     * 埋め込み DocumentText の候補の有無を確認する（ヒット有無のみ）。
+     *
+     * Rust `has_embedded_document_text`（`embedded_document_text(data).is_some()`、
+     * 完全解析成功ベース）の軽量版。Kotlin 版では [JtdFormatDetector.detect] の 4 段目が
+     * この結果のみを使うため、ここでは SsmgV.01 マジック候補の存在確認に留める。
+     * 完全な解析（尤度フィル・span 上限付き）は [embeddedDocumentText] が
+     * [readDocumentTextPayload] 経由で行う（detect での二度目の全文字列解析を避ける）。
+     */
+    fun hasEmbeddedDocumentText(data: ByteArray): Boolean =
+        findDocumentTextMagicOffsets(data).isNotEmpty()
+
+    /**
+     * バイト列に出現する SsmgV.01 マジックの全位置から埋め込み DocumentText の
+     * fragment を回収し [DocumentTextPayload] として結合する。
+     * Rust `embedded_document_text` の完全移植。
+     *
+     * 各出現位置に対し `end = min(次出現位置, 出現位置 + [EMBEDDED_DOCUMENT_TEXT_MAX_SPAN])` の
+     * スパンを解析（[extractDocumentText]）し、[cleanEmbeddedText] で整える。
+     * 空テキスト・重複テキストの span はスキップする。採用された複数 span は bytes を
+     * `[0, 0]` 区切りで連結、text を `"\n"` で連結する。
+     * 採用 fragment がなければ null。
+     */
+    internal fun embeddedDocumentText(data: ByteArray): DocumentTextPayload? {
+        val offsets = findDocumentTextMagicOffsets(data)
+        val bytes = ByteArrayOutputStream()
+        val textParts = mutableListOf<String>()
+
+        for (index in offsets.indices) {
+            val start = offsets[index]
+            val nextStart = offsets.getOrNull(index + 1) ?: data.size
+            val end = min(nextStart, start + EMBEDDED_DOCUMENT_TEXT_MAX_SPAN)
+            if (end <= start) continue
+            val fragment = data.copyOfRange(start, end)
+            val text = cleanEmbeddedText(extractDocumentText(fragment))
+            if (text.isBlank() || textParts.contains(text)) continue
+
+            if (bytes.size() > 0) bytes.write(byteArrayOf(0, 0))
+            bytes.write(fragment)
+            textParts.add(text)
+        }
+
+        if (textParts.isEmpty()) return null
+        return DocumentTextPayload(
+            DocumentTextConstants.EMBEDDED_DOCUMENT_TEXT_PATH,
+            bytes.toByteArray(),
+            textParts.joinToString("\n"),
+        )
+    }
+
+    /**
+     * 埋め込み fragment のテキストを整形する。Rust `clean_embedded_text` と同一:
+     * `\r\n` で分割し、各行の両端から `'\0'` をトリム、空行・[isPlausibleEmbeddedLine]
+     * で弾かれる非尤度行を除去、残りを `"\n"` で再接続する。
+     */
+    private fun cleanEmbeddedText(text: String): String {
+        val keptLines = mutableListOf<String>()
+        for (rawLine in text.split('\r', '\n')) {
+            val line = rawLine.trimStart('\u0000').trimEnd('\u0000')
+            if (line.isBlank() || !isPlausibleEmbeddedLine(line)) continue
+            keptLines.add(line)
+        }
+        return keptLines.joinToString("\n")
+    }
+
+    /**
+     * 埋め込み fragment の 1 行の尤度判定。Rust `is_plausible_embedded_line` と同一:
+     * 空白を除外した総語数が 0 を超え、かつ尤度語数が全体の 80% 以上
+     * （`plausible * 100 >= total * 80`）。
+     */
+    private fun isPlausibleEmbeddedLine(line: String): Boolean {
+        var total = 0
+        var plausible = 0
+        for (character in line) {
+            if (character.isWhitespace()) continue
+            total++
+            if (isPlausibleEmbeddedCharacter(character)) plausible++
+        }
+        return total > 0 && plausible * 100 >= total * 80
+    }
+
+    /**
+     * 埋め込み fragment で妥当な文字か判定する。
+     * Rust `is_plausible_embedded_character`（document_text.rs:432-470）の完全移植:
+     * ASCII graphic、0x3000..=0x30FF / 0x31F0..=0x31FF / 0x3200..=0x33FF /
+     * 0x4E00..=0x9FFF / 0xFF00..=0xFFEF、および [EMBEDDED_PLAUSIBLE_EXTRA_CHARACTERS]。
+     */
+    private fun isPlausibleEmbeddedCharacter(character: Char): Boolean {
+        val code = character.code
+        if (code in 0x21..0x7E) return true // ASCII graphic（Rust char::is_ascii_graphic）
+        return code in 0x3000..0x30FF ||
+            code in 0x31F0..0x31FF ||
+            code in 0x3200..0x33FF ||
+            code in 0x4E00..0x9FFF ||
+            code in 0xFF00..0xFFEF ||
+            character in EMBEDDED_PLAUSIBLE_EXTRA_CHARACTERS
+    }
+
+    /**
+     * バイト列中の SsmgV.01 マジック出現位置をすべて集める。
+     * Rust `find_document_text_magic_offsets` 相当。
+     */
+    private fun findDocumentTextMagicOffsets(data: ByteArray): List<Int> {
+        val offsets = mutableListOf<Int>()
+        val lastStart = data.size - DOCUMENT_TEXT_MAGIC.size
+        if (lastStart < 0) return offsets
+        @Suppress("LoopWithTooManyJumpStatements")
+        outer@ for (offset in 0..lastStart) {
+            for (i in DOCUMENT_TEXT_MAGIC.indices) {
+                if (data[offset + i] != DOCUMENT_TEXT_MAGIC[i]) continue@outer
+            }
+            offsets.add(offset)
+        }
+        return offsets
+    }
 
     /**
      * [decodePrologueUnits] の返り値（Rust `decode_prologue_units` の tuple 返しを

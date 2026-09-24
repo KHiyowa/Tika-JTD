@@ -19,7 +19,8 @@ import org.xml.sax.ContentHandler
  * 2. [JtdFormatDetector.detect] で形式を判定し、必須 metadata を設定
  *    （`X-JTD-Format` と `Content-Type`）。
  * 3. [JtdFormat.UNKNOWN] は [UnsupportedFormatException] をスロー。
- * 4. 形式に応じて `/DocumentText` をサルベージし [DocumentTextParser] で平文化する。
+ * 4. [DocumentTextParser.readDocumentTextPayload]（3 経路フォールバック）で DocumentText
+ *    をサルベージし平文化する。
  * 5. [XHTMLContentHandler] 経由で SAX 出力する。
  *
  * ※ 段落分割・table・ruby の構造化は Step4 以降（[TODO] コメント参照）。
@@ -103,39 +104,28 @@ class JtdParser : AbstractParser() {
     }
 
     /**
-     * 形式ごとに DocumentText を読み出して平文化する。
+     * DocumentText の読み出しは [DocumentTextParser.readDocumentTextPayload] の
+     * 3 経路フォールバック（/DocumentText → /JSCompDocument 展開 → 埋め込みスキャン）に
+     * 全経路で委譲し、形式ごとの重複読み出しロジックを排除する。
      */
     private fun extractPlainText(data: ByteArray, format: JtdFormat): String = when (format) {
-        // /DocumentText が直接読める通常コンテナ。
-        JtdFormat.COMPOUND_DOCUMENT_TEXT -> {
-            val docText = readDocumentText(data)
-            DocumentTextParser.parseDocumentText(docText).plainText()
-        }
+        // /DocumentText が直接読める通常コンテナ・埋め込み SsmgV.01 コンテナ。
+        // 内部的には両経路とも readDocumentTextPayload のフォールバックで処理する。
+        JtdFormat.COMPOUND_DOCUMENT_TEXT,
+        JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT ->
+            DocumentTextParser.readDocumentTextPayload(data).text
 
         // /JSCompDocument が JustCompressedDocument。展開した内部 CFB を再度開封して読む。
         JtdFormat.COMPOUND_JUST_COMPRESSED_DOCUMENT -> {
-            val jsComp = JtdContainerReader.withFileSystem(data) { fs ->
-                JtdContainerReader.readStream(fs, PATH_JS_COMP)
-                    ?: throw NotFoundException("missing /JSCompDocument")
-            }
-            val inner = try {
-                // Step3 のコンポーネント（LHA -lh5-）で展開する。
-                JustCompressedDocument.decompressJustCompressedDocument(jsComp)
+            try {
+                DocumentTextParser.readDocumentTextPayload(data).text
+            } catch (e: NotFoundException) {
+                // /DocumentText 欠落系は従来どおり NotFoundException のまま伝播。
+                throw e
             } catch (e: JtdException) {
-                // -lh5- 以外の LHA メソッド・破損等 → 未対応形式として変換。
+                // -lh5- 以外の LHA メソッド・破損等 → 未対応形式として変換（Step3 の挙動維持）。
                 throw UnsupportedFormatException("JustCompressedDocument decompress failed: ${e.message}")
             }
-            val docText = readDocumentText(inner)
-            DocumentTextParser.parseDocumentText(docText).plainText()
-        }
-
-        // 任意ストリーム内に SsmgV.01 が埋め込まれているコンテナ。
-        JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT -> {
-            // TODO(Step4): 完全な埋め込みスキャン（尤度フィルタ）。
-            // 簡易版: SsmgV.01 マーカーの出現位置以降を DocumentText として通す（末尾詰みは parser が無視する）。
-            val offset = data.indexOfWindow(SSMG_MARKER)
-                ?: throw NotFoundException("embedded DocumentText (SsmgV.01) not found")
-            DocumentTextParser.parseDocumentText(data.copyOfRange(offset, data.size)).plainText()
         }
 
         // CFB ではあるが既知レイアウトに一致しない。
@@ -146,15 +136,6 @@ class JtdParser : AbstractParser() {
         JtdFormat.UNKNOWN ->
             throw UnsupportedFormatException("not a JTD document (no CFB magic)")
     }
-
-    /**
-     * CFB コンテナ [data] から `/DocumentText` ストリームを読み出す。
-     */
-    private fun readDocumentText(data: ByteArray): ByteArray =
-        JtdContainerReader.withFileSystem(data) { fs ->
-            JtdContainerReader.readStream(fs, PATH_DOCUMENT_TEXT)
-                ?: throw NotFoundException("missing /DocumentText")
-        }
 
     /**
      * [TikaInputStream] から全バイトを読み出す。読み込み中に [limit] を超えたら
@@ -182,24 +163,6 @@ class JtdParser : AbstractParser() {
         const val MIME_OCTET_STREAM = "application/octet-stream"
         const val KEY_JTD_FORMAT = "X-JTD-Format"
         const val CONTENT_TYPE = "Content-Type"
-        const val PATH_DOCUMENT_TEXT = "/DocumentText"
-        const val PATH_JS_COMP = "/JSCompDocument"
         const val READ_BUFFER_SIZE = 8192
-        val SSMG_MARKER: ByteArray = "SsmgV.01".toByteArray(Charsets.ISO_8859_1)
     }
-}
-
-/**
- * [haystack] 中の [needle] の最初の出現位置（Rust の windows(n).position 相当）。
- * 見つけられなければ null。
- */
-private fun ByteArray.indexOfWindow(needle: ByteArray): Int? {
-    if (needle.isEmpty()) return 0
-    outer@ for (i in 0..size - needle.size) {
-        for (j in needle.indices) {
-            if (this[i + j] != needle[j]) continue@outer
-        }
-        return i
-    }
-    return null
 }
