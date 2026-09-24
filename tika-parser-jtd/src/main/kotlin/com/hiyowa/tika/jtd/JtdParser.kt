@@ -57,8 +57,12 @@ class JtdParser : AbstractParser() {
 
         // P-H+F: /Header のヘッダ本文（本文テキストを出す直前に取得）。
         // ヘッダなし・全空・読取失敗 → null（本文のみの従来出力を維持するゲート）。
-        // TODO(Step4b): LayoutBoxText の後付け連結は次ステップ。
         val headerText = readHeaderTextOrNull(data)
+
+        // P2: /LayoutBoxText（囲み枠テキスト）。非空のときのみ
+        // 本文の後に「※枠内テキスト」注記を添えて枠テキストを連結する（run_cat 出力契約）。
+        // /LayoutBoxText 欠落・抽出空・読取失敗は ""（従来の本文のみ出力を維持する）。
+        val boxSuffix = readBoxTextSuffix(data)
 
         // 5. SAX 出力（XHTML）。
         // TODO(Step4): 段落分割・table・ruby の構造化。ここでは平文を一字一句そのまま body に載せる簡易版。
@@ -66,9 +70,10 @@ class JtdParser : AbstractParser() {
         xhtml.startDocument()
         xhtml.startElement("body")
         if (plainText.isNotEmpty()) {
-            // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文（1つのテキストノードとして連結）。
+            // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文 → 枠注記（枠テキスト非空のとき）、
+            // 1つのテキストノードとして連結。
             xhtml.characters(
-                if (headerText != null) "$headerText\n\n$plainText" else plainText,
+                headerText?.let { "$it\n\n" }.orEmpty() + plainText + boxSuffix,
             )
         }
         xhtml.endElement("body")
@@ -86,6 +91,16 @@ class JtdParser : AbstractParser() {
         } catch (e: Exception) {
             null
         }
+
+    /**
+     * 枠テキストのサフィックス（P2、Rust `run_cat` の出力契約と同一）。
+     * /LayoutBoxText が非空白テキストを復元できた場合のみ "\n※枠内テキスト\n" ＋ 枠テキストを、
+     * 欠落・抽出空・読取失敗時は ""（本文のみの従来出力）を返す。
+     */
+    private fun readBoxTextSuffix(data: ByteArray): String {
+        val boxText = LayoutBoxTextReader.readLayoutBoxText(data)?.text() ?: return ""
+        return if (boxText.isBlank()) "" else "\n※枠内テキスト\n$boxText"
+    }
 
     /**
      * 形式ごとに DocumentText を読み出して平文化する。
