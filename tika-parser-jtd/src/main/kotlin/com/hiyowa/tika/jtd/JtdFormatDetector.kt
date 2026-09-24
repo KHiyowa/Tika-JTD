@@ -14,7 +14,7 @@ private val JUST_COMPRESSED_MAGIC: ByteArray =
  */
 private val SSMG_MARKER: ByteArray = "SsmgV.01".toByteArray(Charsets.ISO_8859_1)
 
-private val CFB_MAGIC_BYTES: ByteArray = CFB_MAGIC
+private val CFB_MAGIC_BYTES: ByteArray = JtdContainerReader.CFB_MAGIC
 
 /**
  * JTD 形式の 5 段階判定。OpenJTD (rjtd-core/src/format.rs) の判定制御を移植したもの。
@@ -37,11 +37,11 @@ object JtdFormatDetector {
         if (!data.startsWith(CFB_MAGIC_BYTES)) return JtdFormat.UNKNOWN
 
         return try {
-            withFileSystem(data) { fs ->
+            JtdContainerReader.withFileSystem(data) { fs ->
                 when {
-                    readStream(fs, "/DocumentText") != null -> JtdFormat.COMPOUND_DOCUMENT_TEXT
+                    JtdContainerReader.readStream(fs, "/DocumentText") != null -> JtdFormat.COMPOUND_DOCUMENT_TEXT
                     else -> {
-                        val jsComp = readStream(fs, "/JSCompDocument")
+                        val jsComp = JtdContainerReader.readStream(fs, "/JSCompDocument")
                         if (jsComp != null && jsComp.startsWith(JUST_COMPRESSED_MAGIC)) {
                             JtdFormat.COMPOUND_JUST_COMPRESSED_DOCUMENT
                         } else if (data.containsBytes(SSMG_MARKER)) {
