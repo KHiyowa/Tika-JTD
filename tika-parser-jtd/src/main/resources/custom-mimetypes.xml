@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  一太郎文書 (JTD) のカスタム MIME 登録。
+
+  ※ 読み込み先はクラスパスルートの "custom-mimetypes.xml"（Tika 4.0.0 の
+    MimeTypesFactory が classLoader.getResources("custom-mimetypes.xml") で読む）。
+    core が読む base 用の org/apache/tika/mime/tika-mimetypes.xml 配下とは別。
+
+  ※ magic は付けない。CFB offset マジックは core 側の application/x-tika-msoffice
+    （CFB マジック priority 40）と衝突するため。代わりに glob（拡張子）で登録し、
+    sub-class-of で既存の OLE2 容器族に位置づける（core には汎用 OLE2 容器型
+    application/x-ole-storage が存在しないため x-tika-msoffice を使う）。
+    これで resourceName が .jtd/.jtt/.jttc だと MimeTypes.detect が
+    application/vnd.justsystem.ichitaro を返し、本体 JtdParser の
+    getSupportedTypes（vnd.justsystem.ichitaro / x-ole-storage / octet-stream）
+    と JtdFormatDetector の CFB 判定でパースされる。
+-->
+<mime-types>
+  <mime-type type="application/vnd.justsystem.ichitaro">
+    <_comment>一太郎ドキュメント</_comment>
+    <sub-class-of type="application/x-tika-msoffice"/>
+    <glob pattern="*.jtd"/>
+    <glob pattern="*.jtt"/>
+    <glob pattern="*.jttc"/>
+  </mime-type>
+</mime-types>
