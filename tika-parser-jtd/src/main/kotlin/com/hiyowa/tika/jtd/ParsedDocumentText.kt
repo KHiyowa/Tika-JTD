@@ -7,8 +7,10 @@ package com.hiyowa.tika.jtd
  * 連結のみを返し、[DocumentTextElement.ControlBoundary]（ページ切れ・制御境界）と
  * [DocumentTextElement.SkippedInlineText]（ルビ注記等）は出力に含まれない。
  *
- * 注: Rust 版の末尾露出制御文字トリム（trim_trailing_exposed_controls）は
- * 本ステップの対象外（TODO(Step5)）。
+ * Rust と同一に、最終平文は [DocumentTextParser.trimTrailingExposedControls]
+ * （末尾露出制御文字トリム）を適用して返す（Rust `ParsedDocumentText::plain_text`
+ * の `trim_trailing_exposed_controls(&output)` と同一位置）。
+ * 末尾トリムのみ適用され、文中の制御文字は保持される。
  */
 class ParsedDocumentText private constructor(
     private val elements: List<DocumentTextElement>,
@@ -28,7 +30,7 @@ class ParsedDocumentText private constructor(
                 is DocumentTextElement.ControlBoundary -> {}
             }
         }
-        return output.toString()
+        return DocumentTextParser.trimTrailingExposedControls(output.toString())
     }
 
     companion object {

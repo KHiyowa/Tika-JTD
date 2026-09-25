@@ -16,13 +16,15 @@ import kotlin.math.min
  *   → [parseRawTextSegment]（先頭 raw 経路、0x001f 不要）
  * - 混在型（P1）プロローグの raw 先行エミット（[decodeRawPrologue]）
  * - マーカー走査（0x001f run 開始判定・0x001d インライン開始・0x001e 終端・制御境界）
+ * - 自動番号復元（[paragraphHeaderPrefix] / [NumberingState]、Rust `paragraph_header_prefix`）
+ * - 末尾露出制御文字トリム（[trimTrailingExposedControls]、Rust `trim_trailing_exposed_controls`。
+ *   [ParsedDocumentText.plainText] 内で最終平文に適用され、Rust と同一位置）
  * - [readDocumentTextPayload]（3 経路フォールバック: /DocumentText → /JSCompDocument
  *   展開 → 埋め込みスキャン）と [embeddedDocumentText]（SsmgV.01 全出現位置からの
  *   fragment 回収 + 尤度フィル）
  *
  * 未移植（Rust 版との意図的な差分）:
- * - TODO(Step5): ルビ promotion・自動番号付け（NumberingState / paragraph_header_prefix）・
- *   trim_trailing_exposed_controls（末尾露出制御文字トリム）
+ * - ルビ promotion（インライン → 本文のプロモーション）は未移植
  * - [hasEmbeddedDocumentText] は Rust の完全解析成功ベース（`has_embedded_document_text`）ではなく、
  *   検出パスの効率化のためマジック候補存在チェックの軽量版（完全解析は
  *   [readDocumentTextPayload] が担当）
@@ -41,8 +43,8 @@ object DocumentTextParser {
     private const val TEXT_CONTENT_HEADER_WORDS = 16
     // 本文語数フィールドのバイトオフセット（TextV.01 長の先頭語）
     private const val CONTENT_UNIT_COUNT_OFFSET = 28
-    // ルビ等スキップインライン区間の最大語数
-    private const val SKIPPED_INLINE_MAX_UNITS = 256
+    // ルビ等スキップインライン区間の最大語数は [DocumentTextConstants.SKIPPED_INLINE_MAX_UNITS]
+    // （公開定数）。既存の skipped inline 判定が同一値を読むよう集約した。
 
     // RFC 0009 インラインセレクタ文脈の固定語列
     private const val CONTEXT_OPENING = 0x001c
@@ -75,6 +77,7 @@ object DocumentTextParser {
         val run = StringBuilder()
         var readingText = false
         var hasProse = false
+        val numberingState = NumberingState()
 
         // 混在型（P1）: 最初のマーカーより手前の raw 前置きを、後続マーカー本文より前で
         // TextRun として1つ emit する。マーカー型ファイル（前置き空・printable なし）は
@@ -93,9 +96,9 @@ object DocumentTextParser {
                     continue
                 }
                 pushRun(elements, run)
-                // TODO(Step5): 自動番号付け paragraph_header_prefix（NumberingState 連動）
-                // は本ステップの対象外。移植すると段落先頭に「第1章」等の接頭辞が追加されるため、
-                // 移植時はテストの期待値を伴う形で追加すること。
+                // 自動番号付け（Rust `paragraph_header_prefix`）: 0x001f 直前の
+                // 0x001c レコードにスタイル情報が含まれる場合、run 先頭に接頭辞を置く。
+                paragraphHeaderPrefix(units, index, numberingState)?.let { run.append(it) }
                 readingText = true
                 hasProse = true
                 index++
@@ -577,6 +580,143 @@ object DocumentTextParser {
             units.getOrNull(start + 2) == totalLength
     }
 
+    // ------------------------------------------------------------------
+    // 自動番号復元（Rust `paragraph_header_prefix` / `NumberingState` 移植）
+    // 移植元: document_text.rs 860-984 行（NumberingState・circled_number・
+    // alpha_number・paragraph_header_prefix）。行単位で同一アルゴリズム。
+    // ------------------------------------------------------------------
+
+    // 自動番号付けカウンタ。Rust `NumberingState` と同一フィールド構成。
+    // parseDocumentText 内で1コンテナ1個を生成し、0x001f run 開始時のたびに渡す。
+    private class NumberingState {
+        var chapter: Int = 0
+        var section: Int = 0
+        var subsection: Int = 0
+        var listStyle: Int? = null
+        var listCounter: Int = 0
+        var style8Level1Counter: Int = 0
+        var style8Level2Counter: Int = 0
+    }
+
+    // 丸数字 ①〜⑳ を返す。21 以上・0 は Rust と同一に "(" + n + ")" に落着く
+    // （Rust `circled_number`: 1..=20 のみ CIRCLED 表、それ以外は (n)）。
+    private fun circledNumber(n: Int): String {
+        if (n in 1..CIRCLED.size) return CIRCLED[n - 1].toString()
+        return "($n)"
+    }
+
+    // 英小文字 (a)〜(z) を返す。27 以上は "(" + n + ")"（Rust `alpha_number`）。
+    private fun alphaNumber(n: Int): String {
+        if (n in 1..26) return "(${('a' + (n - 1))})"
+        return "($n)"
+    }
+
+    // Rust `paragraph_header_prefix` と同一: 0x001f マーカー（markerIndex）直前に
+    // RFC 0009 レコードフッター（[..] 0x0010 0x001f）が成立し、レコード先頭
+    // （start = markerIndex + 1 - total_len）が 0x001c 0x0010 <len> で開くとき、
+    // レコード内のスタイル語パターンから接頭辞を返しカウンタを進める。
+    //
+    // パターン（windows 走査と同一の find-first / any-where 意味論）:
+    // - 0x00a3 0x0002 <style>  → スタイル種別（見出し 1 / 箇条書き 2-4 / 丸数字 8）
+    // - 0x0050 0x0002 <level>  → 階層（style 1 の見出し 1-3 / style 8 の丸数字階層）
+    // - 0x00a3 0x0002 <style> 0x7fff → 箇条書きの restart マーク（カウンタを 1 に戻す）
+    private fun paragraphHeaderPrefix(
+        units: IntArray,
+        markerIndex: Int,
+        state: NumberingState,
+    ): String? {
+        if (markerIndex < 3 || units[markerIndex - 2] != 0x0000 || units[markerIndex - 1] != 0x0010) {
+            return null
+        }
+        val totalLen = units[markerIndex - 3]
+        if (totalLen < 4 || markerIndex + 1 < totalLen) {
+            return null
+        }
+        val start = (markerIndex + 1) - totalLen
+        if (units.getOrNull(start) != 0x001c ||
+            units.getOrNull(start + 1) != 0x0010 ||
+            units.getOrNull(start + 2) != totalLen
+        ) {
+            return null
+        }
+        val header = units.copyOfRange(start, markerIndex + 1)
+
+        var a3Style: Int? = null
+        var level50: Int? = null
+        for (w in 0..header.size - 3) {
+            if (a3Style == null && header[w] == 0x00a3 && header[w + 1] == 0x0002) {
+                a3Style = header[w + 2]
+            }
+            if (level50 == null && header[w] == 0x0050 && header[w + 1] == 0x0002) {
+                level50 = header[w + 2]
+            }
+        }
+
+        val style = a3Style
+        if (style != null) {
+            if (style == 1 && level50 != null) {
+                state.listStyle = null
+                state.listCounter = 0
+                val level = level50
+                return when (level) {
+                    1 -> {
+                        state.chapter += 1
+                        state.section = 0
+                        state.subsection = 0
+                        "第${state.chapter}章 "
+                    }
+                    2 -> {
+                        state.section += 1
+                        state.subsection = 0
+                        "${state.chapter}.${state.section} "
+                    }
+                    3 -> {
+                        state.subsection += 1
+                        "${state.chapter}.${state.section}.${state.subsection} "
+                    }
+                    else -> "(level $level) "
+                }
+            } else if (style == 8) {
+                val level = level50 ?: 1
+                if (level == 1) {
+                    state.style8Level1Counter += 1
+                    state.style8Level2Counter = 0
+                    return "${circledNumber(state.style8Level1Counter)} "
+                } else {
+                    state.style8Level2Counter += 1
+                    val sym = circledNumber(state.style8Level1Counter)
+                    return "$sym-${state.style8Level2Counter} "
+                }
+            } else if (style in intArrayOf(2, 3, 4)) {
+                var isRestart = false
+                for (w in 0..header.size - 4) {
+                    if (header[w] == 0x00a3 && header[w + 1] == 0x0002 &&
+                        header[w + 2] == style && header[w + 3] == 0x7fff
+                    ) {
+                        isRestart = true
+                        break
+                    }
+                }
+                if (state.listStyle != style || isRestart) {
+                    state.listStyle = style
+                    state.listCounter = 1
+                } else {
+                    state.listCounter += 1
+                }
+                return when (style) {
+                    2 -> "(${state.listCounter}) "
+                    3 -> "${alphaNumber(state.listCounter)} "
+                    else -> "${state.listCounter}. "
+                }
+            }
+        } else {
+            state.listStyle = null
+            state.listCounter = 0
+        }
+
+        return null
+    }
+
     // 表示インライン（0x001d）のセレクタ文脈検証。
     // 文脈 [0x001c, 0x0001, 0x0007, 0x0000, 0x0000, sel] で sel ∈ {0x0001, 0x0003, 0x0013} の
     // み [DocumentTextElement.InlineText] として採用し、sel を返す。
@@ -644,7 +784,7 @@ object DocumentTextParser {
 
     // スキップインライン区間（ルビ注記等）を読み、[DocumentTextElement.SkippedInlineText] を
     // 返し、次インデックスを返す。文脈バイト列から 0x001e を含む生バイトを保持する。
-    // [SKIPPED_INLINE_MAX_UNITS] 語以内で終端がない場合は null（フォールスルー）。
+    // [DocumentTextConstants.SKIPPED_INLINE_MAX_UNITS] 語以内で終端がない場合は null（フォールスルー）。
     private fun readSkippedInlineSegment(
         units: IntArray,
         start: Int,
@@ -656,7 +796,7 @@ object DocumentTextParser {
         val text = StringBuilder()
         var index = start + 1
         while (index < units.size) {
-            if (index - start > SKIPPED_INLINE_MAX_UNITS) return null
+            if (index - start > DocumentTextConstants.SKIPPED_INLINE_MAX_UNITS) return null
             val code = units[index]
             if (code == DocumentTextConstants.INLINE_TEXT_END) {
                 val rawBytes = unitsToBeBytes(units, contextStart, index + 1)
@@ -686,6 +826,48 @@ object DocumentTextParser {
     // 無効スカラー: サロゲート範囲 (0xd800..=0xdfff) と 0xffff。
     private fun isInvalidScalar(code: Int): Boolean =
         code in 0xd800..0xdfff || code == 0xffff
+
+    // 自動番号付けの丸数字 ①〜⑳（Rust `CIRCLED` 配列）。
+    private val CIRCLED = charArrayOf(
+        '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩',
+        '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳',
+    )
+
+    // 本文に露出する端末/境界制御文字。Rust `is_exposed_terminal_control`:
+    // U+FE14 と U+0490 は DocumentText スตรีム末尾に付くペア（`︔Ґ` として観測）、
+    // U+0400 は割り当て済みでないコードポイントでレコードデータとしてのみ現れる。
+    private fun isExposedTerminalControl(code: Int): Boolean =
+        code in intArrayOf(0x0400, 0x0490, 0xFE14)
+
+    /**
+     * [text] 末尾の「露出端末制御文字（および周囲の空白）」の連続を除去する。
+     * Rust `trim_trailing_exposed_controls` と同一アルゴリズム。
+     *
+     * 末尾領域は「空白と露出制御文字」で構成される最大のサフィックスで、
+     * 露出制御文字が少なくとも 1 つ含まれる場合のみ除去される。
+     * 末尾空白のみの連続（正当な行終端）はそのまま維持する。
+     * この末尾領域以外の箇所（文中）に出現する制御文字は保持される。
+     */
+    fun trimTrailingExposedControls(text: String): String {
+        var boundary = text.length
+        var seenControl = false
+        var index = text.length - 1
+        while (index >= 0) {
+            val code = text[index].code
+            when {
+                isExposedTerminalControl(code) -> {
+                    seenControl = true
+                    boundary = index
+                }
+                text[index].isWhitespace() -> {
+                    if (index < boundary) boundary = index
+                }
+                else -> break
+            }
+            index--
+        }
+        return if (seenControl) text.substring(0, boundary) else text
+    }
 
     // バイト列を big-endian u16 語列に変換（Rust の chunks_exact(2) 相当、末尾の奇数バイトは破棄）。
     private fun toUnits(data: ByteArray): IntArray {

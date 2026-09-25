@@ -34,4 +34,9 @@ object DocumentTextConstants {
     const val TEXT_RUN_MARKER = 0x001f
     const val INLINE_TEXT_START = 0x001d
     const val INLINE_TEXT_END = 0x001e
+
+    // ルビ等のスキップインライン区間で終端 (0x001e) を見出しに許す最大語数。
+    // これを超えて終端が来ない区間はスキップできず ControlBoundary へフォールスルーする。
+    // 移植元: document_text.rs:23 `SKIPPED_INLINE_MAX_UNITS`。
+    const val SKIPPED_INLINE_MAX_UNITS = 256
 }
