@@ -4,8 +4,8 @@ import java.io.ByteArrayOutputStream
 import org.apache.tika.io.TikaInputStream
 import org.apache.tika.metadata.Metadata
 import org.apache.tika.mime.MediaType
-import org.apache.tika.parser.AbstractParser
 import org.apache.tika.parser.ParseContext
+import org.apache.tika.parser.Parser
 import org.apache.tika.sax.XHTMLContentHandler
 import org.xml.sax.ContentHandler
 
@@ -28,7 +28,7 @@ import org.xml.sax.ContentHandler
  *
  * ※ 段落分割・table・ruby の構造化は Step4 以降（[TODO] コメント参照）。
  */
-class JtdParser : AbstractParser() {
+class JtdParser : Parser {
 
     override fun getSupportedTypes(context: ParseContext?): Set<MediaType> =
         mutableSetOf(

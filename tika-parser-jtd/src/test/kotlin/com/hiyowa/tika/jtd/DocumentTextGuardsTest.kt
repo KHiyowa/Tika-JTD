@@ -6,6 +6,7 @@ import org.apache.poi.poifs.filesystem.POIFSFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -83,7 +84,7 @@ class DocumentTextGuardsTest {
         assertTrue(boundary is DocumentTextElement.ControlBoundary && boundary.code == 0x001C, "elements[1]=$boundary")
         val inline = parsed.elements()[2]
         assertTrue(inline is DocumentTextElement.InlineText, "elements[2]=$inline")
-        assertEquals(0x0003, (inline as DocumentTextElement.InlineText).selector)
+        assertEquals(0x0003, inline.selector)
         assertEquals("午后", inline.text)
         assertEquals(DocumentTextElement.TextRun("の授業"), parsed.elements()[3])
     }
@@ -111,8 +112,8 @@ class DocumentTextGuardsTest {
 
         val parsed = DocumentTextParser.parseDocumentText(bytes.toByteArray())
         val skipped = parsed.elements().filterIsInstance<DocumentTextElement.SkippedInlineText>().firstOrNull()
-        assertTrue(skipped != null, "テンプレート指示は skipped inline text として保持されるべき")
-        assertEquals(0x0000, skipped!!.selector)
+        assertNotNull(skipped, "テンプレート指示は skipped inline text として保持されるべき")
+        assertEquals(0x0000, skipped.selector)
         assertEquals("名前を入力してください。", skipped.text)
     }
 

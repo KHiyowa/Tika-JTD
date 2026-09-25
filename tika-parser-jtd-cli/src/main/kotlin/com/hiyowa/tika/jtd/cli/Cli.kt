@@ -182,11 +182,8 @@ object Cli {
             } else {
                 // txt/text エイリアス同一バイト契約（移行レポート 第 6 節⑤）。
                 // --sheet 指定時はそのシートのみ出力、未指定時は cat と同一の全文出力。
-                val text = if (options.sheet != null) {
-                    sheetText(data, resolveSelectedSheet(data, options.sheet!!))
-                } else {
-                    parseDocumentText(data, fileName)
-                }
+                val text = options.sheet?.let { sheetText(data, resolveSelectedSheet(data, it)) }
+                    ?: parseDocumentText(data, fileName)
                 writeStdout(out, text)
                 EXIT_OK
             }
