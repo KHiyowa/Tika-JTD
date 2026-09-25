@@ -21,7 +21,10 @@ import org.xml.sax.ContentHandler
  * 3. [JtdFormat.UNKNOWN] は [UnsupportedFormatException] をスロー。
  * 4. [DocumentTextParser.readDocumentTextPayload]（3 経路フォールバック）で DocumentText
  *    をサルベージし平文化する。
- * 5. [XHTMLContentHandler] 経由で SAX 出力する。
+ * 5. [ObjectSheetsReader.readDocumentSheets] でシート列を取得し、[buildCombinedText] が
+ *    model（rjtd-model `Document::plain_text`）と同一規則で本文を組み立てる
+ *    （通常文書なら従来出力+脚注、マルチシートならシート名単独行+シート間 `\n\n` 連結）。
+ * 6. [XHTMLContentHandler] 経由で SAX 出力する。
  *
  * ※ 段落分割・table・ruby の構造化は Step4 以降（[TODO] コメント参照）。
  */
@@ -67,18 +70,121 @@ class JtdParser : AbstractParser() {
 
         // 5. SAX 出力（XHTML）。
         // TODO(Step4): 段落分割・table・ruby の構造化。ここでは平文を一字一句そのまま body に載せる簡易版。
+        // Step6（移行レポート 第6節②③）: マルチシート連結・脚注ペアリングは
+        // [buildCombinedText] が model（rjtd-model lib.rs 214〜239 / 334〜374 行）と
+        // 同一規則で組み上げる。
+        val combinedText = buildCombinedText(data, plainText)
+
         val xhtml = XHTMLContentHandler(contentHandler, metadata)
         xhtml.startDocument()
         xhtml.startElement("body")
-        if (plainText.isNotEmpty()) {
+        if (combinedText.isNotEmpty()) {
             // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文 → 枠注記（枠テキスト非空のとき）、
             // 1つのテキストノードとして連結。
             xhtml.characters(
-                headerText?.let { "$it\n\n" }.orEmpty() + plainText + boxSuffix,
+                headerText?.let { "$it\n\n" }.orEmpty() + combinedText + boxSuffix,
             )
         }
         xhtml.endElement("body")
         xhtml.endDocument()
+    }
+
+    /**
+     * シート構造から本文テキストを組み立てる。
+     *
+     * 移植元: rjtd-model `Document::plain_text`（lib.rs 214〜239 行）と
+     * `IchitaroParser::parse_with_budget`（268〜311 行）。
+     * - シートが 1 以下 → 通常本文。単一シートなら脚注を "\n\n"+trim で末尾に連結。
+     * - シートが 2 以上 → model の else 分岐を厳密移植:
+     *   各シートは「{name}\n{text().trim()}」で、シート間は "\n\n" 連結。
+     *   シート毎に脚注があれば "\n\n"+footnote.trim() を追加。
+     *   ルートシート（storagePath 空）の既定名は「タイトル」。
+     *
+     * 脚注は /Footnote（単一・マルチいずれもシート単位）を model 実装に合わせ読む。
+     */
+    private fun buildCombinedText(
+        data: ByteArray,
+        plainText: String,
+    ): String {
+        val sheets = try {
+            ObjectSheetsReader.readDocumentSheets(data)
+        } catch (e: Exception) {
+            // シート情報復元失敗は通常経路（従来出力）に落ちる。
+            emptyList()
+        }
+
+        return if (sheets.size <= 1) {
+            // 通常文書（/DocumentText のみ）。従来出力 plainText + 単一シート脚注連結。
+            // model: self.sheets.len() <= 1 → document_plain_text + "\n\n" + fn.trim()
+            var text = plainText
+            val footnote = FootnoteTextReader.readFootnoteForSheet(
+                data,
+                ObjectSheetsReader.SheetItem(0, "タイトル", "", null),
+            )
+            if (footnote != null) {
+                text += "\n\n" + footnote.trim()
+            }
+            text
+        } else {
+            // マルチシート: model plain_text の else 分岐。
+            buildMultiSheetText(data, sheets, plainText)
+        }
+    }
+
+    /**
+     * マルチシート連結（model `plain_text` else 分岐の厳密移植）。
+     *
+     * 各シートは「{name}\n{text().trim()}」、シート間は "\n\n" 連結、
+     * 脚注があれば "\n\n"+footnote.trim() を追加する。
+     * シート本体平文: ルート（storagePath 空）は既定の [plainText]（/DocumentText）を再利用、
+     * サブシートは [ObjectSheetsReader.SheetItem.documentTextPath] を読み parse。
+     *
+     * シート本体・脚注は model（lib.rs 276〜286 行）と同一にコンテナ [data] から読む
+     * （JustCompressedDocument でも model が内部 CFB に対して read_document_sheets
+     * しないことと同一）。ストリーム不在・読取・解析失敗は空
+     * （model の `String::new()` / None 落ちに相当）。
+     */
+    private fun buildMultiSheetText(
+        data: ByteArray,
+        sheets: List<ObjectSheetsReader.SheetItem>,
+        plainText: String,
+    ): String {
+        val output = StringBuilder()
+        sheets.forEachIndexed { index, sheet ->
+            if (index > 0) {
+                output.append("\n\n")
+            }
+            val sheetText = if (sheet.storagePath.isEmpty() || sheet.storagePath == "/") {
+                plainText // ルートシート: /DocumentText 本体の既定平文
+            } else {
+                val stream = try {
+                    JtdContainerReader.withFileSystem(data) { fs ->
+                        JtdContainerReader.readStream(fs, sheet.documentTextPath())
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+                if (stream != null) {
+                    try {
+                        DocumentTextParser.parseDocumentText(stream).plainText()
+                    } catch (e: Exception) {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            }
+            output.append(sheet.name)
+            output.append('\n')
+            output.append(sheetText.trim())
+
+            val footnote = FootnoteTextReader.readFootnoteForSheet(data, sheet)
+            if (footnote != null) {
+                output.append("\n\n")
+                output.append(footnote.trim())
+            }
+        }
+        return output.toString()
     }
 
     /**
