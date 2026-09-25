@@ -1,12 +1,14 @@
-# 日本の30年の知を、未来へ。
+# Tika JTD+
 
-カムパネルラ、どこまでもどこまでも一緒に行こう。
-
----
+**Tika JTD+** is an Apache-2.0 parser for Apache Tika, salvaging text and metadata from JustSystems Ichitaro documents (`.jtd`, `.jtt`, `.jttc`) for search indexing and RAG pipelines.
 
 **Tika JTD+** は、ジャストシステム社の一太郎文書（`.jtd` / `.jtt` / `.jttc`）から高精度にテキストおよびメタデータを救出し、現代の検索基盤・データパイプラインへ接続するためのオープンソース（Apache-2.0）パーサープロジェクトです。
 
 Apache Tika の拡張パーサーとして設計されており、孤立したレガシーバイナリを検索インデックスや大規模言語モデル（LLM）のコンテキストへと直接橋渡しします。
+
+# 日本の30年の知を、未来へ。
+
+カムパネルラ、どこまでもどこまでも一緒に行こう。
 
 ---
 
@@ -65,7 +67,7 @@ Apache Tika の拡張パーサーとして設計されており、孤立した�
 
 ## 4. 主な特徴
 
-* **Apache Tika ネイティブ対応:** `tika-core` の `Parser` インターフェースを実装。既存の Tika パイプライン（Apache Solr、Elasticsearch、OpenSearch、独自クローラー）に JAR を追加するだけで `.jtd` が透過的に認識されます。
+* **Apache Tika ネイティブ対応:** `tika-core` の `Parser` インターフェースを実装。既存の Tika パイプライン（Apache Solr、Elasticsearch、OpenSearch、独自クローラー）に JAR を追加するだけで `.jtd` が透過的に認識されます。**公式 Tika Server の Docker コンテナにも、イメージの再ビルドなし・JAR 1 本のマウントだけで組み込めます**（→ [§6](#6-クイックスタート)）。
 * **実戦的な耐性フォールバック:**
   * マーカーが存在せずいきなり本文が始まる初期型・簡易保存ストリームの復元
   * 複雑な申請書に多用される「ネストされたレイアウト枠」からのテキスト救出
@@ -77,7 +79,7 @@ Apache Tika の拡張パーサーとして設計されており、孤立した�
   * OLE2 形式（一太郎8以降）および旧バージョン断片ストリームの識別
 
 
-* **軽量・ゼロ外部依存:** 描画系ライブラリや重厚なGUIフレームワークを一切排除し、サーバサイドやバッチ処理で高速に動作します。
+* **軽量・JVM クリーニング:** 描画系ライブラリや重厚な GUI フレームワーク、外部プロセスを一切抱えません。依存は純粋な JVM 実装の `tika-core` と `Apache POI`（OLE2/CFB 容器の解析担当）のみで、Rust バイナリやネイティブコードは不要です。サーバサイドやバッチ処理で高速に動作します。
 
 ---
 
@@ -141,6 +143,74 @@ java -jar tika-parser-jtd-cli.jar cat path/to/document.jtd
 # 構造化メタデータとテキストの JSON 出力
 java -jar tika-parser-jtd-cli.jar export path/to/document.jtd --format json
 ```
+
+> CLI JAR は `./runtime-classpath/` ディレクトリ（`gradle build` により `build/libs/` へ出力されます）と**同じ階層に置く**と、そのまま `java -jar` で起動できます。
+
+### 公式 Tika Server Docker へ JAR 1 本を配置して組み込む（推奨）
+
+本パーサーの理想の姿は、**Apache Tika の公式コンテナを一切カスタムビルドせず、JAR 1 本を所定のディレクトリに配置するだけで `.jtd` が解析可能になる**ことです。これは、Tika 4 系の公式イメージを使用することで実現可能です。
+
+```bash
+docker run -d --name tika \
+  -p 9998:9998 \
+  -v "$PWD/jars/tika-parser-jtd-0.1.0.jar:/tika-extras/tika-parser-jtd.jar:ro" \
+  apache/tika:latest-full
+```
+
+これにより、このサーバーは `.jtd` / `.jtt` / `.jttc` を処理できるようになります。
+
+#### OpenWebUI などと一緒に docker compose で動かす
+
+```yaml
+services:
+  tika:
+    image: apache/tika:latest-full   # 公式イメージのまま。build: は不要
+    ports:
+      - "9998:9998"
+    volumes:
+      - ./jars/tika-parser-jtd.jar:/tika-extras/tika-parser-jtd.jar:ro
+    restart: always
+```
+
+OpenWebUI 側は Admin Panel → Settings → Documents で Extract Engine に `Tika`、Server URL に `http://tika:9998` を指定するだけです。
+
+#### 動作確認
+
+```bash
+# 標準のテキスト抽出エンドポイント
+curl -T sample.jtd http://localhost:9998/tika
+
+# Tika 4 の JSON テキストエンドポイント（OpenWebUI が使用）
+curl -T sample.jtd http://localhost:9998/tika/json/text
+```
+
+#### なぜ「配置するだけ」で認識されるのか
+
+公式 `apache/tika:latest-full`（4.0.0 実測）の ENTRYPOINT は、標準で `/tika-extras/` をクラスパスに含みます。
+
+```
+java -cp "/opt/tika-server/*:/opt/tika-server/lib/*:/tika-extras/*" \
+  org.apache.tika.server.core.TikaServerCli -h 0.0.0.0
+```
+
+つまり、配置した JAR の中身が、そのまま Tika の読み込み機構に組み込まれます。
+
+1. **`META-INF/services/org.apache.tika.parser.Parser`** — ServiceLoader が `com.hiyowa.tika.jtd.JtdParser` を自動登録し、`AutoDetectParser`（およびサーバーのパーサーチェーン）が `.jtd` を受け取るようになります。
+2. **JAR ルートの `custom-mimetypes.xml`** — `application/vnd.justsystem.ichitaro`（glob: `*.jtd` / `*.jtt` / `*.jttc`）の MIME 定義が自動マージされます。外部の mimetypes 設定ファイルは不要です。
+3. **純粋 JVM 実装** — OLE2 容器の解析は JVM 版 Apache POI が行うため、コンテナ内に Rust バイナリやネイティブライブラリを配置する必要がありません。
+
+#### Docker を使わないローカル実行
+
+Tika 4 には公式の「extras ディレクトリ」機構（`org.apache.tika.config.TikaExtras`）があります。JAR を置いたディレクトリをシステムプロパティで指定するだけで同様のことが可能です。
+
+```bash
+java -Dtika.extras.dir=./jars \
+  -jar tika-server-standard-4.0.0.jar   # お使いの tika-server JAR
+```
+
+> [!NOTE]
+> **前身の `tika-openjtd` コンテナとの比較:**
+> 旧構成では、Rust 版 `rjtd` を multi-stage ビルドでコンパイルし、`ExternalParser` + wrapper スクリプト + 外部 `tika-config.json` / `custom-mimetypes.xml` をコンテナ設定に組み込む必要がありました。Kotlin/JVM 化により、これらは **JAR 1 本と 1 行の volume マウント**に置き換わりました。
 
 ---
 
