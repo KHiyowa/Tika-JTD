@@ -8,9 +8,9 @@ package com.hiyowa.tika.jtd
  * 合成フィクスチャと同一構造、word 単位）:
  * ```text
  * w[0..9]        SsmgV.01 ヘッダ（w[9] = ブロック数）
- * w[10 + 128*k]（byte 20 + 256*k）に各ブロック:
+ * w[10 + 128*k]（byte 20 + 256*k）境界上に各ブロック（可変ピッチ・複数スロット跨ぎあり）:
  *   "TextV.01"（4語） + [0x0000, span 長（語数）]（2語） + span 内容 + 0x0000 パディング
- *   （ブロック語ピッチ 128 word = 256 byte）
+ *   （スロット語ピッチ 128 word = 256 byte。長 span は複数スロットを消費する）
  * ストリーム末尾: 位置/所有テーブル列（dword 群、'c'(0x000063)・'I'(0x000049) 等の
  *   printable な語を含む）。テキスト復元には絶対に読めない。
  * ```
@@ -26,7 +26,8 @@ package com.hiyowa.tika.jtd
  * ブロック毎に（前置き text ＋ インライン/run text を出現順で連結、前置き内の
  * CR/LF は保持）、ブロック間を '\n' で連結。
  *
- * 読取領域はブロック数（w[9]）とピッチで厳密に区切り、末尾テーブル列は読まない。
+ * 読取領域は w[9] を上限端（ブロック領域の端）として区切り、末尾テーブル列は読まない。
+ * span は宣言長厳守で読むため、span 末尾に残る非ゼロのレコード尾部語は混入しない。
  * span 復元は P1 のプロローグ raw デコード機構（[DocumentTextParser.decodePrologueUnits] /
  * [DocumentTextParser.firstTextMarker]）と通常のマーカー走査
  * （[DocumentTextParser.parseDocumentText]）を再利用する。
@@ -77,14 +78,19 @@ object LayoutBoxTextReader {
         }
 
     /**
-     * /LayoutBoxText ペイロード（ストリーム全体）を解析する（Rust `parse_layout_box_text`、
-     * 84〜132行の忠実移植）。
+     * /LayoutBoxText ペイロード（ストリーム全体）を解析する（Rust `parse_layout_box_text`
+     * 由来・可変ピッチ対応のため逐次追進方式に変更）。
      *
-     * SsmgV.01 マジック + 語数>=10 のゲートの後、w[9]（ブロック数）で領域を区切る。
-     * ブロック数が 0 は空の [LayoutBoxText]（null ではない）。ブロック領域の宣言分が
-     * 欠ける（切り詰め等）・ブロック先頭の "TextV.01" セグメント名不一致・
-     * span 長がブロックピッチ内最大（[LAYOUT_BOX_MAX_SPAN_WORDS] 語）を超える入力は
-     * null（cat は本文のみを出力し続ける）。
+     * SsmgV.01 マジック + 語数>=10 のゲートの後、w[9] をブロック領域の上限端として
+     * 領域を区切る（10 + w[9]*128 がストリーム側に存在しなければ null＝切り詰め）。
+     * ブロックは p=10 から逐次追進: "TextV.01" + [0x0000, span 長] + span を宣言長厳守で
+     * 復元し、span 終端より後ろの次の 128 語境界からセグメント名のあるスロットまで
+     * 128 語刻みで追進する（可変ピッチ・複数スロット跨ぎ対応。span 長は 1 スロット
+     * 上限 [LAYOUT_BOX_MAX_SPAN_WORDS] 語を超えてよい）。
+     * ブロック数が 0 は空の [LayoutBoxText]（null ではない）。先頭ブロックの
+     * "TextV.01" セグメント名不一致（構造崩壊）・span の領域超過（切り詰め）は null
+     * （cat は本文のみを出力し続ける）。追進先で名前が見つからなければ打ち切り、
+     * 集約済みのブロックを返す。
      */
     fun parseLayoutBoxText(data: ByteArray): LayoutBoxText? {
         if (!data.startsWith(LAYOUT_BOX_MAGIC) || data.size < LAYOUT_BOX_HEADER_WORDS * 2) {
@@ -99,25 +105,37 @@ object LayoutBoxTextReader {
             return LayoutBoxText(emptyList())
         }
 
-        // ブロック領域は w[9]（ブロック数）とピッチで厳密に区切る（末尾テーブルは読まない）。
-        // 宣言分が欠ける（切り詰め等）レイアウトは復元不能とみなす。
+        // w[9] はブロック領域の上限端（固定ピッチならブロック数そのもの、可変ピッチの
+        // 長 span レイアウトでは領域上限端の宣言）。宣言分が欠ける（切り詰め等）は null。
         val blockAreaEnd = LAYOUT_BOX_HEADER_WORDS + blockCount * LAYOUT_BOX_BLOCK_PITCH_WORDS
         if (units.size < blockAreaEnd) {
             return null
         }
 
+        // 逐次追進方式: span 終端より後ろの次の 128 語境界から、セグメント名を持つ
+        // スロット（可変ピッチ・複数スロット跨ぎあり）順にブロックを復元する。
         val blocks = mutableListOf<String>()
-        for (k in 0 until blockCount) {
-            val blockUnitStart = LAYOUT_BOX_HEADER_WORDS + k * LAYOUT_BOX_BLOCK_PITCH_WORDS
-            if (!isTextv01SegmentName(units, blockUnitStart)) {
+        var p = LAYOUT_BOX_HEADER_WORDS
+        while (p < blockAreaEnd) {
+            if (!isTextv01SegmentName(units, p)) {
+                // 先頭ブロック不在は構造崩壊（null）、以降の未発見は正常打ち切り。
+                return if (blocks.isEmpty()) null else LayoutBoxText(blocks)
+            }
+            val spanStart = p + TEXT_SEGMENT_NAME_WORDS + LAYOUT_BOX_SPAN_HEADER_WORDS
+            val spanLen = units.getOrNull(spanStart - 1) ?: return null
+            val spanEnd = spanStart + spanLen
+            // 宣言長厳守。span が領域上限端・ストリーム末尾を超える切り詰めは null。
+            if (spanEnd > blockAreaEnd || spanEnd > units.size) {
                 return null
             }
-            val spanStart = blockUnitStart + TEXT_SEGMENT_NAME_WORDS + LAYOUT_BOX_SPAN_HEADER_WORDS
-            val spanLen = units.getOrNull(spanStart - 1) ?: 0
-            if (spanLen > LAYOUT_BOX_MAX_SPAN_WORDS) {
-                return null
+            blocks.add(decodeLayoutBoxSpan(units, spanStart, spanEnd))
+            // span 終端より後ろの次の 128 語境界へ追進し、セグメント名のあるスロットまで
+            // 128 語刻みで探索する（パディング・レコード尾部語は決して読まない）。
+            var next = LAYOUT_BOX_HEADER_WORDS + ceilToPitch(spanEnd - LAYOUT_BOX_HEADER_WORDS)
+            while (next < blockAreaEnd && !isTextv01SegmentName(units, next)) {
+                next += LAYOUT_BOX_BLOCK_PITCH_WORDS
             }
-            blocks.add(decodeLayoutBoxSpan(units, spanStart, spanStart + spanLen))
+            p = next
         }
 
         return LayoutBoxText(blocks)
@@ -156,6 +174,12 @@ object LayoutBoxTextReader {
             if (units[offset + j] != TEXT_SEGMENT_NAME[j]) return false
         }
         return true
+    }
+
+    // 128 語ピッチへの切り上げ（ピッチ境界算出用・必ず正の整数）。
+    private fun ceilToPitch(words: Int): Int {
+        val pitch = LAYOUT_BOX_BLOCK_PITCH_WORDS
+        return ((words + pitch - 1) / pitch) * pitch
     }
 
     // units[from..to) を big-endian バイナリ化（Rust `words_to_be_bytes` 対応）。
