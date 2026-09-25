@@ -111,16 +111,20 @@ dependencies {
 ```kotlin
 import org.apache.tika.metadata.Metadata
 import org.apache.tika.parser.AutoDetectParser
+import org.apache.tika.parser.ParseContext
 import org.apache.tika.sax.BodyContentHandler
-import java.io.FileInputStream
+import org.apache.tika.io.TikaInputStream
+import java.nio.file.Path
 
 fun main() {
     val parser = AutoDetectParser()
     val handler = BodyContentHandler(-1) // 容量無制限
     val metadata = Metadata()
 
-    FileInputStream("sample.jtd").use { stream ->
-        parser.parse(stream, handler, metadata)
+    // Tika 4 系では parse() のストリーム型が TikaInputStream です。
+    // Path から開くとファイル名 (.jtd) が MIME 検出にそのまま使われます。
+    TikaInputStream.get(Path.of("sample.jtd")).use { stream ->
+        parser.parse(stream, handler, metadata, ParseContext())
     }
 
     println("--- 抽出テキスト ---")
