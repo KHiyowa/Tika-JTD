@@ -33,6 +33,13 @@ subprojects {
             showCauses = true
             showStackTraces = true
         }
+
+        // 実データコーパス golden レール（opt-in・git 未追跡）。
+        // gradle test -Pgatagate.corpus で sha256 1,204 行の全件照合を回す（MIGRATION.md §10.5 手順5）
+        if (providers.gradleProperty("gatagate.corpus").isPresent) {
+            systemProperty("gatagate.corpus", "true")
+            systemProperty("gatagate.root", rootProject.projectDir.absolutePath)
+        }
     }
 
     extensions.configure<JavaPluginExtension> {

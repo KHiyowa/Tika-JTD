@@ -31,3 +31,16 @@ tasks.jar {
         )
     }
 }
+
+// ローカルコーパス（git 未追跡・opt-in）から golden を採取する開発タスク（MIGRATION.md §10.5）
+val captureGolden by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Capture golden stdout/exit outputs for the local corpus (testdata/corpus, git-ignored)"
+    mainClass.set("com.hiyowa.tika.jtd.capture.GoldenCapture")
+    classpath = sourceSets["test"].runtimeClasspath
+    args(
+        "--corpus", rootProject.projectDir.resolve("testdata/corpus"),
+        "--out", rootProject.projectDir.resolve("testdata/golden/new"),
+        "--root", rootProject.projectDir,
+    )
+}
