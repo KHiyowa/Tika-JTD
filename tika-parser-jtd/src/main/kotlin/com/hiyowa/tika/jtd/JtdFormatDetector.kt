@@ -1,7 +1,5 @@
 package com.hiyowa.tika.jtd
 
-import java.io.IOException
-
 /**
  * JustCompressedDocument ストリーム (`/JSCompDocument`) の先頭マジック。
  * `0x26 0x00` + "JustCompressedDocument"（ASCII）。
@@ -27,7 +25,14 @@ object JtdFormatDetector {
      *    存在）-> [JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT]
      * 5. その他 CFB -> [JtdFormat.COMPOUND_UNKNOWN]
      *
-     * POI の開封失敗・読み出し失敗（エントリ不在を除く）は [JtdFormat.COMPOUND_UNKNOWN] へ収束させる。
+     * POI の開封失敗・読み出し失敗（エントリ不在を除く）は §2.3 第 2 防衛線の
+     * 埋め込みスキャン判定へフォールバックし、[DocumentTextParser.hasEmbeddedDocumentText]
+     * がヒットすれば [JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT] に、
+     * ヒットしなければ [JtdFormat.COMPOUND_UNKNOWN] へ収束させる。
+     *
+     * 実測（POI 5.5.1）: 破損 CFB では `POIFSFileSystem` コンストラクタが
+     * PropertyTable ディレクトリ走査中 `IndexOutOfBoundsException`（"Block N not found"）を
+     * 投げるため、`IOException` キャッチでは拾えず、例外型の広い `catch (Exception)` で扱う。
      */
     fun detect(data: ByteArray): JtdFormat {
         if (!data.startsWith(CFB_MAGIC_BYTES)) return JtdFormat.UNKNOWN
@@ -51,9 +56,18 @@ object JtdFormatDetector {
                     }
                 }
             }
-        } catch (e: IOException) {
-            // POI 開封失敗（破損 CFB 等）・上限超過等の読み出し失敗
-            JtdFormat.COMPOUND_UNKNOWN
+        } catch (e: Exception) {
+            // POI 開封失敗（破損 CFB 等）・上限超過等の読み出し失敗。
+            // POI 5.5.1 実測: 破損 CFB では POIFSFileSystem コンストラクタ（PropertyTable
+            // ディレクトリ走査）が IndexOutOfBoundsException（"Block N not found"）を投げ、
+            // IOException キャッチでは拾えないため、ここでは型に関係なく拾う。
+            // §2.3 第 2 防衛線: まず SsmgV.01 埋め込み候補を確認し、ヒットなら
+            // COMPOUND_EMBEDDED_DOCUMENT_TEXT、なければ従来どおり COMPOUND_UNKNOWN。
+            if (DocumentTextParser.hasEmbeddedDocumentText(data)) {
+                JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT
+            } else {
+                JtdFormat.COMPOUND_UNKNOWN
+            }
         }
     }
 }

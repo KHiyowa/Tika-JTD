@@ -197,11 +197,22 @@ object DocumentTextParser {
      *
      * 1 と 2 の CFS 読み出しは同一の [POIFSFileSystem] を再利用し、
      * 同一コンテナを二度開かない（内部 CFB は別コンテナなので改めて開く）。
+     *
+     * §2.3 第 2 防衛線（salvage 配線）: 外部コンテナ開封（[JtdContainerReader.open]）が失敗した場合は
+     * 経路 3 の埋め込みスキャン [readEmbeddedDocumentText] へ直行する（開封失敗時は fs を
+     * close しない構造にする）。実測（POI 5.5.1）では破損 CFB のディレクトリ連鎖走査で
+     * `IndexOutOfBoundsException`（"Block N not found"、IOException ではない）が投じられるため、
+     * ここは例外型に関係なく [Exception] で受け止める。
      */
     internal fun readDocumentTextPayloadWithBudget(data: ByteArray, budget: DecompressionBudget): DocumentTextPayload {
         budget.checkInputSize(data.size.toLong())
-        // 外部 CFB を一回だけ開く（経路 1・2 の読み出しを共有）
-        val fs = JtdContainerReader.open(data)
+        // 外部 CFB を一回だけ開く（経路 1・2 の読み出しを共有）。
+        // 破損 CFB 等での開封失敗は §2.3 第 2 防衛線（経路 3 埋め込みスキャン）へ直行する。
+        val fs = try {
+            JtdContainerReader.open(data)
+        } catch (e: Exception) {
+            return readEmbeddedDocumentText(data)
+        }
         try {
             val stream = JtdContainerReader.readStream(fs, DocumentTextConstants.DOCUMENT_TEXT_PATH)
             return if (stream != null) {
