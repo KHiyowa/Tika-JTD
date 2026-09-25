@@ -1,3 +1,5 @@
+![Tika JTD+](docs/tika-jtd.jpg)
+
 # Tika JTD+
 
 **Tika JTD+** is an Apache-2.0 parser for Apache Tika, salvaging text and metadata from JustSystems Ichitaro documents (`.jtd`, `.jtt`, `.jttc`) for search indexing and RAG pipelines.
@@ -26,7 +28,7 @@ Apache Tika の拡張パーサーとして設計されており、孤立した�
 
 ## 2. なぜ前身（OpenJTD）は頓挫し、本プロジェクトは何を変えたのか
 
-本プロジェクトは、先人たちが挑んだオープンソースプロジェクト **OpenJTD（`rjtd`）** のコードと観測資産を受け継ぎ、根本的な方針転換を行って再出発したフォークです。
+本プロジェクトは、先人たちが挑んだオープンソースプロジェクト **[OpenJTD](https://github.com/KimEJ/OpenJTD)（`rjtd`）** のコードと観測資産を受け継ぎ、根本的な方針転換を行って再出発したフォークです。
 
 ### 夢の挫折：WYSIWYGエディタという泥沼
 
@@ -83,10 +85,14 @@ Apache Tika の拡張パーサーとして設計されており、孤立した�
 
 ---
 
-## 5. 動作環境 (Requirements)
+## 5. 動作環境と対応範囲 (Requirements & Scope)
 
 * **Java (JVM):** Java 17 以降 (Java 17, 21 LTS 動作確認)
 * **Apache Tika:** 4.0.0 以上
+
+> [!IMPORTANT]
+> **出力形式について（v0.1.0 現在）:**
+> 本バージョン（0.1.0）では、検索インデックスや RAG パイプラインでの利用を主眼としており、**Tika のプレーンテキスト出力のみに対応**しています。XHTML によるタグ構造化や Markdown 等の出力形式には対応していません。
 
 > [!NOTE]
 > **Tika 3系へのバックポートについて:**
@@ -136,15 +142,15 @@ fun main() {
 
 ### CLI による単体抽出
 
+GitHub Releases から `tika-parser-jtd-cli-0.1.0-standalone.jar`（すべての依存関係を内包した単体実行可能 JAR）をダウンロードすれば、単体でそのまま実行できます。
+
 ```bash
 # テキストの標準出力
-java -jar tika-parser-jtd-cli.jar cat path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.1.0-standalone.jar cat path/to/document.jtd
 
 # 構造化メタデータとテキストの JSON 出力
-java -jar tika-parser-jtd-cli.jar export path/to/document.jtd --format json
+java -jar tika-parser-jtd-cli-0.1.0-standalone.jar export path/to/document.jtd --format json
 ```
-
-> CLI JAR は `./runtime-classpath/` ディレクトリ（`gradle build` により `build/libs/` へ出力されます）と**同じ階層に置く**と、そのまま `java -jar` で起動できます。
 
 ### 公式 Tika Server Docker へ JAR 1 本を配置して組み込む（推奨）
 
@@ -209,7 +215,7 @@ java -Dtika.extras.dir=./jars \
 ```
 
 > [!NOTE]
-> **前身の `tika-openjtd` コンテナとの比較:**
+> **前身の [`tika-openjtd`](https://github.com/KHiyowa/tika-openjtd) コンテナとの比較:**
 > 旧構成では、Rust 版 `rjtd` を multi-stage ビルドでコンパイルし、`ExternalParser` + wrapper スクリプト + 外部 `tika-config.json` / `custom-mimetypes.xml` をコンテナ設定に組み込む必要がありました。Kotlin/JVM 化により、これらは **JAR 1 本と 1 行の volume マウント**に置き換わりました。
 
 ---
@@ -218,20 +224,21 @@ java -Dtika.extras.dir=./jars \
 
 ### 500ファイル超の実世界コーパスによる耐性検証
 
-本パーサーの開発および耐性評価にあたっては、机上の仕様推測にとどまらず、日本の公共・実務現場で実際に流通している多様な実文書（計 **564 ファイル** の `.jtd` および公式テンプレート 38 ファイル）をローカル検証コーパスとして網羅的なパース検証・耐性試験を実施しています。
+本パーサーの開発および耐性評価にあたっては、机上の仕様推測にとどまらず、日本の公共・実務現場で実際に流通している多様な実文書（計 **510 ファイル** の `.jtd`）をローカル検証コーパスとして網羅的なパース検証・耐性試験を実施しています。
 
-| 分類 | ファイル数 | 対象・内容 |
-| :--- | :--- | :--- |
-| **中央省庁・国** | 243 files | 官公庁の公開文書、各種申請様式、審議会資料・報告書（`.jtd`） |
-| **教育委員会・学校** | 120 files | 指導案、行事予定表、教育相談依頼書、学校評価（`.jtd`） |
-| **都道府県警察** | 100 files | 警察本部・警察署の公開申請様式、各種案内（`.jtd`） |
-| **地方自治体** | 80 files | 自治体の総合計画、パブリックコメント様式、各種届出（`.jtd`） |
-| **裁判所** | 18 files | 裁判所の手続案内、各種申立書（`.jtd`） |
-| **オーナー実文書** | 3 files | リポジトリオーナー（京橋ひよわ）の修士論文、政策提言書、レポート（`.jtd`） |
-| **公式テンプレート** | 38 files | ジャストシステム公式の `.jtt` (30件) および独自圧縮 `.jttc` (8件) |
-| **合計** | **602 files** | **実世界コーパス総数（`.jtd` 564件 ＋ テンプレート 38件）** |
+一太郎で同じ文書を doc 出力したものと比較し、**テキストを 95% 以上再現できているものを合格**として判定しています。
 
-これにより、単一シートのシンプルな文書から、ネストされた複数レイアウト枠、多重罫線表、旧形式の OLE2 断片ストリーム、独自圧縮 `JustCompressedDocument` に至るまで、実戦的なフェイルセーフ動作を検証しています。
+| コーパス | ファイル数 | 合格率 | 平均一致度 |
+| :--- | :--- | :--- | :--- |
+| **裁判所** | 16 files | 93.8% | 0.991 |
+| **教育委員会・学校** | 114 files | 74.6% | 0.955 |
+| **中央省庁・国** | 236 files | 68.6% | 0.951 |
+| **地方自治体** | 69 files | 59.4% | 0.910 |
+| **都道府県警察** | 73 files | 26.0% | 0.878 |
+| **オーナー実文書** | 2 files | 50.0% | 0.925 |
+| **合計** | **510 files** | **63.3%** | **0.937** |
+
+これにより、単一シートのシンプルな文書から、ネストされた複数レイアウト枠、多重罫線表、旧形式の OLE2 断片ストリームに至るまで、実戦的なフェイルセーフ動作を検証しています。
 
 ### 「銀河鉄道の夜」ポリシー（テストケース提供のお願い）
 
