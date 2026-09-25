@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      - name: Prepare Release Assets
+        run: |
+          mkdir -p release-assets
+          # Tika Parser JAR (tika-server / library drop-in)
+          cp tika-parser-jtd/build/libs/tika-parser-jtd-[0-9]*.jar release-assets/
+          # CLI Standalone Executable JAR (single fat jar, java -jar executable)
+          cp tika-parser-jtd-cli/build/libs/tika-parser-jtd-cli-*-standalone.jar release-assets/
+          # CLI Distribution Zip (jar + runtime-classpath/)
+          if [ -d tika-parser-jtd-cli/build/distributions ]; then
+            cp tika-parser-jtd-cli/build/distributions/tika-parser-jtd-cli-*.zip release-assets/ || true
+          fi
+          # Exclude source JARs from release assets
+          rm -f release-assets/*-sources.jar
+          echo "=== Release Assets ==="
+          ls -lh release-assets/
+
+      - name: Upload Build Artifacts (Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-jars
+          path: release-assets/*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true

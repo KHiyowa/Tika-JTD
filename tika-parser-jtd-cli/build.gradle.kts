@@ -32,6 +32,39 @@ tasks.jar {
     }
 }
 
+// 依存関係をすべて内包した単体実行可能 JAR（java -jar 1本で動作可能）
+val standaloneJar by tasks.registering(Jar::class) {
+    group = "build"
+    description = "Assembles a standalone, fat executable JAR containing all dependencies."
+    archiveClassifier.set("standalone")
+    manifest {
+        attributes("Main-Class" to "com.hiyowa.tika.jtd.cli.MainKt")
+    }
+    from(sourceSets["main"].output)
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get().filter { it.name.endsWith(".jar") }.map { zipTree(it) }
+    }) {
+        exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+}
+
+// runtime-classpath を同梱した配布用 ZIP アーカイブ
+val distZip by tasks.registering(Zip::class) {
+    group = "distribution"
+    description = "Bundles the CLI JAR and its runtime-classpath directory into a zip archive."
+    archiveBaseName.set("tika-parser-jtd-cli")
+    from(tasks.jar)
+    from(copyRuntimeClasspath) {
+        into("runtime-classpath")
+    }
+}
+
+tasks.assemble {
+    dependsOn(standaloneJar, distZip)
+}
+
 // ローカルコーパス（git 未追跡・opt-in）から golden を採取する開発タスク（MIGRATION.md §10.5）
 val captureGolden by tasks.registering(JavaExec::class) {
     group = "verification"
