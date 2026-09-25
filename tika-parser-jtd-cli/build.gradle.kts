@@ -1,5 +1,11 @@
+val poiVersion = "5.5.1"
+
 dependencies {
     implementation(project(":tika-parser-jtd"))
+    // JtdContainerReader の公開 API（withFileSystem）が POIFSFileSystem を露出するため、
+    // サブシート本体の読み出しに直接アクセスする本 CLI は POI をコンパイル期に必要とする
+    // （実行期は :tika-parser-jtd 経由で同一バージョンが classpath に載る）。
+    implementation("org.apache.poi:poi:$poiVersion")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
