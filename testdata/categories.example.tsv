@@ -1,0 +1,17 @@
+# 実世界コーパス耐性検証 カテゴリ定義設定ファイル
+#
+# 書式: <表示カテゴリ名>\t<対象ディレクトリパス>
+#
+# パスは以下のいずれかで指定可能です:
+# - プロジェクトルートからの相対パス (例: testdata/corpus/cou-web-jtd)
+# - testdata/corpus からの相対パス (例: cou-web-jtd)
+# - 絶対パス
+#
+# 先頭の '#' や空行は無視されます。
+
+裁判所	testdata/corpus/cou-web-jtd
+教育委員会・学校	testdata/corpus/edu-web-jtd
+中央省庁・国	testdata/corpus/gov-web-jtd
+地方自治体	testdata/corpus/lg-web-jtd
+都道府県警察	testdata/corpus/pol-web-jtd
+オーナー実文書	testdata/corpus/owner-jtd
