@@ -43,8 +43,7 @@ class GoldenManifestRailTest {
             val source = File(root, rel)
             assertTrue(source.isFile, "コーパス入力が見つからない: $rel")
             val args = when (command) {
-                "export" -> listOf("export", source.absolutePath, "--format", "txt")
-                "cat" -> listOf("cat", source.absolutePath)
+                "text" -> listOf("--text", source.absolutePath)
                 else -> error("unknown cmd in manifest: $command")
             }
             val stdout = ByteArrayOutputStream()

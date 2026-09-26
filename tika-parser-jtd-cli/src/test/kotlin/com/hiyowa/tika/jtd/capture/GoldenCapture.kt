@@ -11,18 +11,16 @@ import kotlin.system.exitProcess
  * 移行元 `OpenJTD/scripts/capture_golden.sh` の Kotlin 版（MIGRATION.md §10.5 手順3・手順4の採取側）。
  *
  * コーパス配下の .jtd/.jtt/.jttc の全ファイルに対して [Cli.run] 経由で
- * `export <file> --format txt` と `cat <file>` を実行し、旧スクリプトと同一のレイアウトで
- * 採取結果を保存する。旧スクリプトが release バイナリを直接叩いていたのに対し、本ハーネスは
- * [Cli.run] 経由で実行することで「`java -jar` と同一経路の CLI 契約」を golden に保持する
+ * `--text <file>` を実行し、Tika 標準のテキスト抽出契約で
+ * 採取結果を保存する。[Cli.run] 経由で実行することで「`java -jar` と同一経路の CLI 契約」を golden に保持する
  * （exit コード・stdout バイト・stderr 非保存の3点すべてが CLI 本体の挙動そのものになる）。
  *
  * 出力レイアウト（[outDir] 以下。相対パスの `/` を `_` に置換した写像名）:
- * - `<relpathの/→_>.export.txt`: `export --format txt` の stdout バイト列
- * - `<relpathの/→_>.cat.txt`: `cat` の stdout バイト列
+ * - `<relpathの/→_>.text.txt`: `--text` の stdout バイト列
  * - `manifest.tsv`: `relpath<TAB>cmd<TAB>exit<TAB>sha256(stdout)` を UTF-8・TAB 区切り・
- *   各行 `\n` 終端で1ファイル2行（export 行が先）
+ *   各行 `\n` 終端で1ファイル1行（cmd=text）
  *
- * stderr バイトはディスクに一切書かない（旧スクリプトが `rm -f *.err` していた契約を踏襲）。
+ * stderr バイトはディスクに一切書かない。
  * 採取順序は [manifestRoot] 基準の相対パス文字列の Unicode コードポイント順で固定し、
  * manifest と出力ファイル名の対応が再現可能になる。
  *
@@ -39,17 +37,16 @@ object GoldenCapture {
 
     /**
      * [corpusDir] 配下のコーパス（.jtd/.jtt/.jttc のみ）を再帰収集し、ファイルごとに
-     * `export --format txt` と `cat` を [Cli.run] で実行して stdout・exit コードを採取する。
+     * `--text` を [Cli.run] で実行して stdout・exit コードを採取する。
      *
      * 収集順序は [manifestRoot] 基準の相対パス（`rel`）の Unicode コードポイント順
-     * （`sortedBy { rel }`）。各ファイルは export 行が先に、その直後に cat 行の順で
-     * manifest 行 `rel<TAB>cmd<TAB>exit<TAB>sha256(stdout)` を記録し、最後に
+     * （`sortedBy { rel }`）。各ファイルは manifest 行 `rel<TAB>text<TAB>exit<TAB>sha256(stdout)` を記録し、最後に
      * [outDir]/manifest.tsv（UTF-8・TAB 区切り・各行 `\n` 終端）として書き出す。
      *
      * @param corpusDir 採取対象のコーパスルートディレクトリ
      * @param outDir golden 出力先ディレクトリ（必要に応じて mkdirs）
      * @param manifestRoot manifest 行の relpath の基準ディレクトリ（通常はリポジトリルート）
-     * @return 収集したファイル数（manifest 行数の**半分**。0 の場合は例外）
+     * @return 収集したファイル数（manifest 行数と一致。0 の場合は例外）
      * @throws IllegalArgumentException [corpusDir] がディレクトリでない場合
      * @throws IllegalStateException 収集ファイルが 0 件の場合（旧スクリプトの total==0 → exit 1 相当）
      */
@@ -68,11 +65,10 @@ object GoldenCapture {
             )
         }
         outDir.mkdirs()
-        val manifestRows = ArrayList<String>(entries.size * 2)
+        val manifestRows = ArrayList<String>(entries.size)
         entries.forEachIndexed { index, (rel, file) ->
             val outsuffix = rel.replace('/', '_')
-            captureCommand(rel, outsuffix, outDir, "export", file, manifestRows)
-            captureCommand(rel, outsuffix, outDir, "cat", file, manifestRows)
+            captureCommand(rel, outsuffix, outDir, "text", file, manifestRows)
             if ((index + 1) % PROGRESS_EVERY == 0) {
                 System.err.println("captured ${index + 1}/${entries.size} files")
             }
@@ -95,11 +91,7 @@ object GoldenCapture {
         file: File,
         rows: MutableList<String>,
     ) {
-        val args = if (command == "export") {
-            listOf("export", file.absolutePath, "--format", "txt")
-        } else {
-            listOf("cat", file.absolutePath)
-        }
+        val args = listOf("--text", file.absolutePath)
         val stdout = ByteArrayOutputStream()
         val stderr = ByteArrayOutputStream() // 取得のみ（ディスクに書かない）
         val exit = Cli.run(args, stdout, stderr)
