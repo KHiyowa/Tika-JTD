@@ -1,18 +1,29 @@
 package com.hiyowa.tika.jtd.cli
 
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
+import java.io.OutputStreamWriter
 import java.io.PrintStream
+import java.nio.charset.StandardCharsets
 import org.apache.tika.cli.TikaCLI
+import org.apache.tika.config.TikaExtras
+import org.apache.tika.io.TikaInputStream
+import org.apache.tika.metadata.Metadata
+import org.apache.tika.metadata.TikaCoreProperties
+import org.apache.tika.parser.AutoDetectParser
+import org.apache.tika.parser.ParseContext
+import org.apache.tika.parser.Parser
+import org.apache.tika.sax.BodyContentHandler
 
 /**
  * フル機能 Tika CLI (`tika-app` 互換) のディスパッチャおよび実行ハーネス。
  * [MainKt.main] は本オブジェクトの exit コードで終了する。
  *
  * 標準オプション:
- * - `-t`, `--text`: プレーンテキスト抽出（従来の cat / export --format txt 相当）
+ * - `-t`, `--text`: プレーンテキスト抽出（スレッドセーフな直接高速パス）
  * - `-m`, `--metadata`: メタデータ一覧出力
- * - `-J`, `--jsonRecursive`: 構造化 JSON 出力（従来の export --format json 相当）
+ * - `-J`, `--jsonRecursive`: 構造化 JSON 出力
  * - `-x`, `--xml`: XHTML 出力
  * - `-h`, `--help`: ヘルプ表示（exit 0）
  *
@@ -27,11 +38,21 @@ object Cli {
     private const val EXIT_FAILURE = 1
     private const val EXIT_USAGE = 2
 
-    private val lock = Any()
+    /**
+     * 共有 AutoDetectParser（スレッドセーフ）。
+     * Tika 4.0 のパーサーおよび検出器はスレッドセーフに設計されており、
+     * 複数スレッドから同時に並行パースを実行可能。
+     */
+    private val sharedParser: Parser by lazy {
+        TikaExtras.install()
+        AutoDetectParser()
+    }
+
+    private val fallbackLock = Any()
 
     /**
      * コマンド実行の入口。[run] は例外を投げず、exit コードだけ返す。
-     * [out] および [err] に出力を流し込み、インプロセスでの高速テスト実行をサポートする。
+     * [out] および [err] に出力を流し込み、インプロセスでの高速並列テスト実行をサポートする。
      */
     fun run(args: List<String>, out: OutputStream, err: OutputStream): Int {
         if (args.isEmpty()) {
@@ -40,10 +61,46 @@ object Cli {
 
         // 単体の help / -h / --help / -? はヘルプ表示（exit 0）
         if (args.size == 1 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help" || args[0] == "-?")) {
-            return executeWithStreams(listOf("--help"), out, err)
+            return executeFallback(listOf("--help"), out, err)
         }
 
-        return executeWithStreams(args, out, err)
+        // 高速・スレッドセーフな直接テキスト抽出パス (--text / -t <file>)
+        // System.setOut の差し替えを行わず、指定の OutputStream へ直接ストリーム出力するため完全スレッドセーフ。
+        if (args.size == 2 && (args[0] == "--text" || args[0] == "-t")) {
+            return runTextExtract(args[1], out, err)
+        }
+
+        return executeFallback(args, out, err)
+    }
+
+    private fun runTextExtract(filePath: String, out: OutputStream, err: OutputStream): Int {
+        val file = File(filePath)
+        if (!file.isFile) {
+            val ps = PrintStream(err, true, "UTF-8")
+            ps.println("File not found: $filePath")
+            return EXIT_FAILURE
+        }
+        return try {
+            val metadata = Metadata()
+            metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, file.name)
+            val writer = OutputStreamWriter(out, StandardCharsets.UTF_8)
+            val handler = BodyContentHandler(writer)
+            val context = ParseContext()
+            context.set(Parser::class.java, sharedParser)
+
+            TikaInputStream.get(file.toPath(), metadata).use { stream ->
+                sharedParser.parse(stream, handler, metadata, context)
+            }
+            writer.flush()
+            EXIT_OK
+        } catch (e: Exception) {
+            if (isBrokenPipe(e)) {
+                return EXIT_OK
+            }
+            val ps = PrintStream(err, true, "UTF-8")
+            ps.println(e.message ?: e.javaClass.name)
+            EXIT_FAILURE
+        }
     }
 
     private fun failUsage(err: OutputStream, message: String?): Int {
@@ -51,12 +108,12 @@ object Cli {
         if (message != null) {
             ps.println(message)
         }
-        executeWithStreams(listOf("--help"), err, err)
+        executeFallback(listOf("--help"), err, err)
         return EXIT_USAGE
     }
 
-    private fun executeWithStreams(args: List<String>, out: OutputStream, err: OutputStream): Int {
-        synchronized(lock) {
+    private fun executeFallback(args: List<String>, out: OutputStream, err: OutputStream): Int {
+        synchronized(fallbackLock) {
             val originalOut = System.out
             val originalErr = System.err
             val printOut = PrintStream(out, true, "UTF-8")

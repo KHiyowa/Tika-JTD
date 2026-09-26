@@ -65,14 +65,11 @@ object GoldenCapture {
             )
         }
         outDir.mkdirs()
-        val manifestRows = ArrayList<String>(entries.size)
-        entries.forEachIndexed { index, (rel, file) ->
+        // スレッドセーフな Cli.run を用いて並列に golden を採取
+        val manifestRows = entries.parallelStream().map { (rel, file) ->
             val outsuffix = rel.replace('/', '_')
-            captureCommand(rel, outsuffix, outDir, "text", file, manifestRows)
-            if ((index + 1) % PROGRESS_EVERY == 0) {
-                System.err.println("captured ${index + 1}/${entries.size} files")
-            }
-        }
+            captureCommand(rel, outsuffix, outDir, "text", file)
+        }.toList()
         File(outDir, "manifest.tsv")
             .writeText(manifestRows.joinToString(separator = "\n", postfix = "\n"), Charsets.UTF_8)
         return entries.size
@@ -80,7 +77,7 @@ object GoldenCapture {
 
     /**
      * 1 ファイル 1 コマンドの採取。[Cli.run] を呼んで exit コードと stdout バイトを取得し、
-     * `<outsuffix>.<cmd>.txt` に書き出してから manifest 行を [rows] に積む。
+     * `<outsuffix>.<cmd>.txt` に書き出してから manifest 行を返す。
      * stderr は取得のみでディスクに書かない。
      */
     private fun captureCommand(
@@ -89,14 +86,13 @@ object GoldenCapture {
         outDir: File,
         command: String,
         file: File,
-        rows: MutableList<String>,
-    ) {
+    ): String {
         val args = listOf("--text", file.absolutePath)
         val stdout = ByteArrayOutputStream()
         val stderr = ByteArrayOutputStream() // 取得のみ（ディスクに書かない）
         val exit = Cli.run(args, stdout, stderr)
         File(outDir, "$outsuffix.$command.txt").writeBytes(stdout.toByteArray())
-        rows.add("$rel\t$command\t$exit\t${sha256Hex(stdout.toByteArray())}")
+        return "$rel\t$command\t$exit\t${sha256Hex(stdout.toByteArray())}"
     }
 
     /** [MessageDigest] による sha256（旧スクリプトの `shasum -a 256` と同一の16進小文字表記）。 */
