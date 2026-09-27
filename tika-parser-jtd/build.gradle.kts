@@ -1,3 +1,7 @@
+plugins {
+    id("com.vanniktech.maven.publish")
+}
+
 val tikaVersion = "4.0.0"
 val poiVersion = "5.5.1"
 
@@ -11,4 +15,40 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+mavenPublishing {
+    publishToMavenCentral()
+    signAllPublications()
+
+    coordinates(
+        groupId = project.group.toString(),
+        artifactId = project.name,
+        version = project.version.toString(),
+    )
+
+    pom {
+        name.set("tika-parser-jtd")
+        description.set("Apache Tika 4 parser for Ichitaro (.jtd) document format")
+        url.set("https://github.com/KHiyowa/tika-jtd")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("repo")
+            }
+        }
+        developers {
+            developer {
+                id.set("khiyowa")
+                name.set("KHiyowa")
+                url.set("https://github.com/KHiyowa")
+            }
+        }
+        scm {
+            connection.set("scm:git:git://github.com/KHiyowa/tika-jtd.git")
+            developerConnection.set("scm:git:ssh://github.com/KHiyowa/tika-jtd.git")
+            url.set("https://github.com/KHiyowa/tika-jtd")
+        }
+    }
 }
