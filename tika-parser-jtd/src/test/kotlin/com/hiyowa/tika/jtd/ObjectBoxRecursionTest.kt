@@ -561,8 +561,36 @@ class ObjectBoxRecursionTest {
     }
 
     @Test
+    fun extractsImageFromDeepMultiSheetStorageAndLeadingControlChar() {
+        val pngBody = "銀河鉄道".toByteArray(Charsets.UTF_8)
+        val contents = contentsStream(64, PNG_HEADER + pngBody)
+        // マルチシート構造（ルートから深さ 5 の EmbedItems 配下の Embedding ストレージ）
+        // かつ \u0003Contents のように先頭に制御文字が付与されたストリーム
+        val deepPath = "/ObjectSheets/DocSheet/DOCS_0003/EmbedItems/Embedding 1/\u0003Contents"
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                deepPath to contents,
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        val (text, _) = parse(data, contextWith(extractor))
+
+        assertEquals(1, extractor.calls.size, "深さ5のEmbedItems配下の制御文字付きContentsから委譲されること")
+        val call = extractor.calls[0]
+        assertEquals("embedded-1.png", call.resourceName)
+        assertEquals("image/png", call.contentType)
+        val expected = PNG_HEADER + pngBody
+        assertTrue(call.bytes.contentEquals(expected), "Contents から PNG ヘッダ以降が切り出されること")
+        assertContains(text, ROOT_TEXT)
+    }
+
+    @Test
     fun stopsRecursionAtDepthLimit() {
-        val deep = "/a/b/c/d/e/f/Embedding 1/Workbook"
+        // ルート(1) -> a(2) -> b(3) -> c(4) -> d(5) -> e(6) -> f(7) -> g(8) -> h(9)
+        // MAX_EMBEDDED_DEPTH(8) を超えるため打ち切られる
+        val deep = "/a/b/c/d/e/f/g/h/Embedding 1/Workbook"
         val data = cfb(
             mapOf(
                 "/DocumentText" to markerDocumentText(ROOT_TEXT),

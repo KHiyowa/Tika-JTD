@@ -64,8 +64,8 @@ object ObjectBoxExtractor {
     /** GIF マジック（先頭 4 バイト "GIF8"）。 */
     private val GIF_MAGIC = "GIF8".toByteArray(Charsets.ISO_8859_1)
 
-    /** 埋め込み走査の再帰上限（ルート直下を深さ 1 とする）。 */
-    private const val MAX_EMBEDDED_DEPTH = 4
+    /** 埋め込み走査の再帰上限（ルート直下を深さ 1 とする。マルチシート構成の EmbedItems 等の深さに対応するため 8 に設定）。 */
+    private const val MAX_EMBEDDED_DEPTH = 8
 
     /** 1 文書あたりの parseEmbedded 委譲上限件数。 */
     private const val MAX_EMBEDDED_OBJECTS = 64
@@ -169,9 +169,9 @@ object ObjectBoxExtractor {
         val presses = mutableListOf<DocumentEntry>()
         for (entry in storage.entries) {
             if (entry !is DocumentEntry) continue
-            if (entry.name.equals("Workbook", ignoreCase = true)) {
+            if (isWorkbookName(entry.name)) {
                 workbooks.add(entry)
-            } else if (entry.name.equals("Contents", ignoreCase = true)) {
+            } else if (isContentsName(entry.name)) {
                 contents.add(entry)
             } else if (isEmbeddedPressName(entry.name)) {
                 presses.add(entry)
@@ -186,15 +186,35 @@ object ObjectBoxExtractor {
     }
 
     /**
-     * EmbeddedPress ストリーム名の判定。
-     * 先頭の制御文字 \u0003 を除いた接頭辞が "embeddedpress"（大文字小文字無視）なら true。
+     * Workbook ストリーム名の判定。
+     * 先頭の制御文字（\u0001〜\u0003等）を除いた名前が "workbook"（大文字小文字無視）なら true。
      */
-    private fun isEmbeddedPressName(name: String): Boolean {
+    private fun isWorkbookName(name: String): Boolean =
+        stripLeadingControlChars(name).equals("workbook", ignoreCase = true)
+
+    /**
+     * Contents ストリーム名の判定。
+     * 先頭の制御文字（\u0001〜\u0003等）を除いた名前が "contents"（大文字小文字無視）なら true。
+     */
+    private fun isContentsName(name: String): Boolean =
+        stripLeadingControlChars(name).equals("contents", ignoreCase = true)
+
+    /**
+     * EmbeddedPress ストリーム名の判定。
+     * 先頭の制御文字（\u0001〜\u0003等）を除いた接頭辞が "embeddedpress"（大文字小文字無視）なら true。
+     */
+    private fun isEmbeddedPressName(name: String): Boolean =
+        stripLeadingControlChars(name).lowercase().startsWith("embeddedpress")
+
+    /**
+     * ストリーム名から先頭の制御文字（0x00〜0x1F）を除去する。
+     */
+    private fun stripLeadingControlChars(name: String): String {
         var trimmed = name.trim()
-        while (trimmed.startsWith("\u0003")) {
+        while (trimmed.isNotEmpty() && trimmed[0].code < 0x20) {
             trimmed = trimmed.substring(1)
         }
-        return trimmed.lowercase().startsWith("embeddedpress")
+        return trimmed
     }
 
     // ---- オブジェクト枠ストリームの前処理と委譲 ----
