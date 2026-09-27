@@ -55,7 +55,7 @@ mavenPublishing {
 }
 
 tasks.jar {
-    enabled = false
+    archiveClassifier.set("thin")
 }
 
 tasks.shadowJar {
@@ -66,3 +66,8 @@ tasks.shadowJar {
         include(dependency("org.jetbrains:annotations.*"))
     }
 }
+
+tasks.assemble {
+    dependsOn(tasks.shadowJar)
+}
+
