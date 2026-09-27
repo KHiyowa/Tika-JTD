@@ -12,6 +12,8 @@ Tika JTD+ では、**「エディタ・描画エンジンの夢を放棄し、�
 
 そのため、`openjtd-spec/rfc` の全 10 件のうち、バイナリ仕様・コンテナ構造・テキスト/シート抽出に直結する **9 件 (RFC 0001, 0002, 0003, 0005, 0006, 0007, 0008, 0009, 0010)** を採用し、レンダラ・中間ドキュメントモデル・PDF エクスポート構想を主眼としていた **RFC 0004 は除外** しました。
 
+また、Tika JTD+ で新たに解読・実装された仕様（オブジェクト枠からの埋め込みドキュメント抽出等）については、後続の RFC（**RFC 0011〜**）として本仕様空間で継続的に標準化・管理します。
+
 ---
 
 ## RFC 目録
@@ -27,6 +29,7 @@ Tika JTD+ では、**「エディタ・描画エンジンの夢を放棄し、�
 | **0008** | [Object and Embedded Image Stream Candidates](rfc/0008-object-stream-candidates.md)<br>[Object and Embedded Image Stream Candidates](rfc/0008-object-stream-candidates.ja.md) | 埋め込み / 図形 | `EmbedItems`, `Embedding`, `LayoutBox`, `Figure` などのストリーム調査。レイアウト枠・埋め込みオブジェクトのテキスト救済の基盤資料 |
 | **0009** | [Document Text Paragraph Records](rfc/0009-document-text-paragraph-record.md)<br>[DocumentText 段落レコード構造](rfc/0009-document-text-paragraph-record.ja.md) | 本文レコード構造 | `0x001c` レコード (class 0x0000/0x0010/0x0020/0x0030) の自己記述型可変長ヘッダ構造 (`DocumentTextParser` の核心仕様) |
 | **0010** | [Document Sheets](rfc/0010-document-sheets.md)<br>[Document Sheets (マルチシート構造)](rfc/0010-document-sheets.ja.md) | マルチシート | `/DocItemInfo` (UTF-16LE) および `/ObjectSheets/DocSheet/DOCS_XXXX/` 構造の解析 (`ObjectSheetsReader`) |
+| **0011** | [ObjectBox and Embedded Document Extraction](rfc/0011-object-box-embedded-documents.md)<br>[オブジェクト枠 (ObjectBox) と埋め込みドキュメント抽出仕様](rfc/0011-object-box-embedded-documents.ja.md) | 埋め込み / 再帰抽出 | `Embedding N` / `OleItem N` ストレージ走査、生 BIFF8 の CFB ラップ (`Workbook`)、WMF スライス (`\x03EmbeddedPress`)、Tika 再帰抽出 (`ObjectBoxExtractor`) |
 
 ---
 
