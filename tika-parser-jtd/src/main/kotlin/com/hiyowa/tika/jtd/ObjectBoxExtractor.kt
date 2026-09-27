@@ -49,8 +49,20 @@ object ObjectBoxExtractor {
     /** CFB (OLE2) マジック。生データが既に CFB コンテナかを判定する。 */
     private val CFB_MAGIC = JtdContainerReader.CFB_MAGIC
 
-    /** WMF ヘッダ先頭 4 バイト（type=0x0001・headerSize=9 語・リトルエンディアン）。 */
+    /** WMF ヘッダ先頭 4 バイト（type=0x0001, headerSize=9語 = 0x0009・リトルエンディアン）。 */
     private val WMF_HEADER_MAGIC = byteArrayOf(0x01, 0x00, 0x09, 0x00)
+
+    /** EMF ヘッダ先頭 4 バイト（iType=0x00000001・リトルエンディアン）。 */
+    private val EMF_HEADER_MAGIC = byteArrayOf(0x01, 0x00, 0x00, 0x00)
+
+    /** EMF ヘッダオフセット 40..44 のシグネチャ (" EMF" = 0x28434D45)。 */
+    private val EMF_SIGNATURE = " EMF".toByteArray(Charsets.ISO_8859_1)
+
+    /** PNG マジック（先頭 4 バイト 0x89 'P' 'N' 'G'）。 */
+    private val PNG_MAGIC = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
+
+    /** GIF マジック（先頭 4 バイト "GIF8"）。 */
+    private val GIF_MAGIC = "GIF8".toByteArray(Charsets.ISO_8859_1)
 
     /** 埋め込み走査の再帰上限（ルート直下を深さ 1 とする）。 */
     private const val MAX_EMBEDDED_DEPTH = 4
@@ -58,8 +70,11 @@ object ObjectBoxExtractor {
     /** 1 文書あたりの parseEmbedded 委譲上限件数。 */
     private const val MAX_EMBEDDED_OBJECTS = 64
 
-    /** "METAFILE" プレフィックス後の WMF ヘッダマーカー探索範囲（偶数オフセット幅）。 */
-    private const val WMF_HEADER_SEARCH_WINDOW = 96
+    /** メタファイルヘッダ探索範囲（偶数オフセット幅）。 */
+    private const val METAFILE_HEADER_SEARCH_WINDOW = 256
+
+    /** Contents 画像ヘッダ探索範囲。 */
+    private const val IMAGE_HEADER_SEARCH_WINDOW = 512
 
     /** 単一オブジェクト読み出しバッファサイズ。 */
     private const val READ_BUFFER_SIZE = 8192
@@ -139,7 +154,7 @@ object ObjectBoxExtractor {
 
     /**
      * オブジェクト枠ストレージ 1 個の処理。
-     * 同一ストレージ内では Workbook を優先し、続けて EmbeddedPress* を名前順で処理する。
+     * 同一ストレージ内では Workbook（表計算）を優先し、続いて Contents（生画像）、最後に EmbeddedPress*（メタファイル）を処理する。
      */
     private fun processEmbeddingStorage(
         storage: DirectoryEntry,
@@ -150,18 +165,23 @@ object ObjectBoxExtractor {
         state: ScanState,
     ) {
         val workbooks = mutableListOf<DocumentEntry>()
+        val contents = mutableListOf<DocumentEntry>()
         val presses = mutableListOf<DocumentEntry>()
         for (entry in storage.entries) {
             if (entry !is DocumentEntry) continue
             if (entry.name.equals("Workbook", ignoreCase = true)) {
                 workbooks.add(entry)
+            } else if (entry.name.equals("Contents", ignoreCase = true)) {
+                contents.add(entry)
             } else if (isEmbeddedPressName(entry.name)) {
                 presses.add(entry)
             }
         }
+        contents.sortBy { it.name.lowercase() }
         presses.sortBy { it.name.lowercase() }
 
         workbooks.forEach { delegateWorkbook(it, pathPrefix, extractor, context, handler, state) }
+        contents.forEach { delegateContentsImage(it, pathPrefix, extractor, context, handler, state) }
         presses.forEach { delegatePress(it, pathPrefix, extractor, context, handler, state) }
     }
 
@@ -216,10 +236,87 @@ object ObjectBoxExtractor {
     }
 
     /**
+     * Contents ストリームに内包される生画像（JPEG, PNG, BMP, GIF）の委譲。
+     *
+     * 一太郎の画像枠では、ヘッダおよび元ファイルパスの後に生画像バイナリが直接格納される。
+     * マジックバイトを検出してスライスし、Tika の画像・OCR パイプラインへ委譲する。
+     */
+    private fun delegateContentsImage(
+        entry: DocumentEntry,
+        pathPrefix: String,
+        extractor: EmbeddedDocumentExtractor,
+        context: ParseContext,
+        handler: ContentHandler,
+        state: ScanState,
+    ) {
+        if (state.limitReached) return
+        val raw = readEntryBytes(entry) ?: return
+        val sliced = sliceImageFromContents(raw) ?: return
+
+        delegate(
+            payload = sliced.bytes,
+            handler = handler,
+            extractor = extractor,
+            context = context,
+            state = state,
+            contentType = sliced.contentType,
+            extension = sliced.extension,
+            relationshipPath = "$pathPrefix${entry.name}",
+        )
+    }
+
+    /** 切り出された画像データ情報。 */
+    private data class SlicedImage(
+        val bytes: ByteArray,
+        val extension: String,
+        val contentType: String,
+    )
+
+    /**
+     * Contents バイナリから生画像をスライスする。
+     */
+    private fun sliceImageFromContents(raw: ByteArray): SlicedImage? {
+        val searchLimit = minOf(raw.size - 4, IMAGE_HEADER_SEARCH_WINDOW)
+        for (i in 0..searchLimit) {
+            // 1. JPEG: FF D8 FF
+            if ((raw[i].toInt() and 0xFF) == 0xFF &&
+                (raw[i + 1].toInt() and 0xFF) == 0xD8 &&
+                (raw[i + 2].toInt() and 0xFF) == 0xFF
+            ) {
+                return SlicedImage(raw.copyOfRange(i, raw.size), "jpg", "image/jpeg")
+            }
+            // 2. PNG: 89 50 4E 47 0D 0A 1A 0A
+            if (i + 8 <= raw.size &&
+                raw[i] == PNG_MAGIC[0] && raw[i + 1] == PNG_MAGIC[1] &&
+                raw[i + 2] == PNG_MAGIC[2] && raw[i + 3] == PNG_MAGIC[3]
+            ) {
+                return SlicedImage(raw.copyOfRange(i, raw.size), "png", "image/png")
+            }
+            // 3. GIF: GIF8
+            if (raw[i] == GIF_MAGIC[0] && raw[i + 1] == GIF_MAGIC[1] &&
+                raw[i + 2] == GIF_MAGIC[2] && raw[i + 3] == GIF_MAGIC[3]
+            ) {
+                return SlicedImage(raw.copyOfRange(i, raw.size), "gif", "image/gif")
+            }
+            // 4. BMP: "BM" + DIB ヘッダサイズ検証 (40, 108, 124)
+            if (raw[i] == 'B'.code.toByte() && raw[i + 1] == 'M'.code.toByte() && i + 18 <= raw.size) {
+                val dibHeaderSize = (raw[i + 14].toInt() and 0xFF) or
+                    ((raw[i + 15].toInt() and 0xFF) shl 8) or
+                    ((raw[i + 16].toInt() and 0xFF) shl 16) or
+                    ((raw[i + 17].toInt() and 0xFF) shl 24)
+                if (dibHeaderSize == 40 || dibHeaderSize == 108 || dibHeaderSize == 124) {
+                    return SlicedImage(raw.copyOfRange(i, raw.size), "bmp", "image/bmp")
+                }
+            }
+        }
+        return null
+    }
+
+    /**
      * 図形 press オブジェクト枠（EmbeddedPress）の委譲。
      *
-     * 先頭 8 バイトが "METAFILE" のもののみ対象。WMF ヘッダマーカー（0x01 0x00 0x09 0x00）
-     * を探索し、その位置から末尾までを WMF 本体として切り出して委譲する。
+     * 先頭 8 バイトが "METAFILE" のもののみ対象。WMF または EMF ヘッダマーカー
+     * を探索し、その位置から末尾までをメタファイル本体として切り出して委譲する。
      */
     private fun delegatePress(
         entry: DocumentEntry,
@@ -232,38 +329,58 @@ object ObjectBoxExtractor {
         if (state.limitReached) return
         val raw = readEntryBytes(entry) ?: return
         if (!raw.startsWith(METAFILE_MAGIC)) return
-        val payload = sliceWmfFromPress(raw) ?: return
+        val metafile = sliceMetafileFromPress(raw) ?: return
 
         delegate(
-            payload = payload,
+            payload = metafile.bytes,
             handler = handler,
             extractor = extractor,
             context = context,
             state = state,
-            contentType = "image/wmf",
-            extension = "wmf",
+            contentType = metafile.contentType,
+            extension = metafile.extension,
             relationshipPath = "$pathPrefix${entry.name}",
         )
     }
 
+    /** 切り出されたメタファイルデータ情報。 */
+    private data class SlicedMetafile(
+        val bytes: ByteArray,
+        val extension: String,
+        val contentType: String,
+    )
+
     /**
-     * press ストリームから WMF 本体を切り出す。
-     * 偶数オフセット 8..8+[WMF_HEADER_SEARCH_WINDOW] で最初に [WMF_HEADER_MAGIC] が現れた位置から末尾までを返す。
+     * press ストリームから WMF または EMF 本体を切り出す。
      */
-    private fun sliceWmfFromPress(press: ByteArray): ByteArray? {
-        if (press.size < METAFILE_MAGIC.size + WMF_HEADER_MAGIC.size) return null
+    private fun sliceMetafileFromPress(press: ByteArray): SlicedMetafile? {
         val limit = minOf(
-            press.size - WMF_HEADER_MAGIC.size,
-            METAFILE_MAGIC.size + WMF_HEADER_SEARCH_WINDOW,
+            press.size - 4,
+            METAFILE_MAGIC.size + METAFILE_HEADER_SEARCH_WINDOW,
         )
         for (offset in METAFILE_MAGIC.size..limit step 2) {
+            // 1. WMF: 01 00 09 00
             if (
                 press[offset] == WMF_HEADER_MAGIC[0] &&
                 press[offset + 1] == WMF_HEADER_MAGIC[1] &&
                 press[offset + 2] == WMF_HEADER_MAGIC[2] &&
                 press[offset + 3] == WMF_HEADER_MAGIC[3]
             ) {
-                return press.copyOfRange(offset, press.size)
+                return SlicedMetafile(press.copyOfRange(offset, press.size), "wmf", "image/wmf")
+            }
+            // 2. EMF: 01 00 00 00 かつ offset+40 に " EMF" (0x20 0x45 0x4D 0x46)
+            if (
+                offset + 44 <= press.size &&
+                press[offset] == EMF_HEADER_MAGIC[0] &&
+                press[offset + 1] == EMF_HEADER_MAGIC[1] &&
+                press[offset + 2] == EMF_HEADER_MAGIC[2] &&
+                press[offset + 3] == EMF_HEADER_MAGIC[3] &&
+                press[offset + 40] == EMF_SIGNATURE[0] &&
+                press[offset + 41] == EMF_SIGNATURE[1] &&
+                press[offset + 42] == EMF_SIGNATURE[2] &&
+                press[offset + 43] == EMF_SIGNATURE[3]
+            ) {
+                return SlicedMetafile(press.copyOfRange(offset, press.size), "emf", "image/emf")
             }
         }
         return null

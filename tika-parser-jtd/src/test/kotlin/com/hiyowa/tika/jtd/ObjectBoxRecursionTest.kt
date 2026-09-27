@@ -59,6 +59,25 @@ class ObjectBoxRecursionTest {
         )
 
         private const val EMBEDDED_PRESS_NAME = "\u0003EmbeddedPress"
+
+        // EMF ヘッダ（iType=1 + 36バイトfiller + " EMF"）
+        private val EMF_HEADER = byteArrayOf(
+            0x01, 0x00, 0x00, 0x00,
+        ) + ByteArray(36) + " EMF".toByteArray(Charsets.ISO_8859_1)
+
+        // 画像ヘッダ（実測レイアウト準拠の最小マジック）
+        private val JPEG_HEADER = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
+        private val PNG_HEADER = byteArrayOf(
+            0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(),
+            0x0D, 0x0A, 0x1A, 0x0A,
+        )
+        private val BMP_HEADER = byteArrayOf(
+            'B'.code.toByte(), 'M'.code.toByte(),
+            0x00, 0x00, 0x00, 0x00, // file size
+            0x00, 0x00, 0x00, 0x00, // reserved
+            0x36, 0x00, 0x00, 0x00, // pixel data offset
+            0x28, 0x00, 0x00, 0x00, // DIB header size (40 = BITMAPINFOHEADER)
+        )
     }
 
     // ---- テストハーネス ----
@@ -143,6 +162,16 @@ class ObjectBoxRecursionTest {
     /** "METAFILE" プレフィックス + 38 バイトの press ヘッダ + WMF データ を模したストリーム。 */
     private fun metafilePressStream(wmfBody: ByteArray): ByteArray {
         return METAFILE_MAGIC + PRESS_FILLER + WMF_HEADER + wmfBody
+    }
+
+    /** "METAFILE" プレフィックス + 38 バイトの press ヘッダ + EMF データ を模したストリーム。 */
+    private fun metafileEmfPressStream(emfBody: ByteArray): ByteArray {
+        return METAFILE_MAGIC + PRESS_FILLER + EMF_HEADER + emfBody
+    }
+
+    /** 任意バイトのヘッダ／パス文字列プレフィックス + 生画像データを模した Contents ストリーム。 */
+    private fun contentsStream(prefixLength: Int, imagePayload: ByteArray): ByteArray {
+        return ByteArray(prefixLength) { 0x30.toByte() } + imagePayload
     }
 
     private fun cfb(entries: Map<String, ByteArray>): ByteArray {
@@ -345,6 +374,122 @@ class ObjectBoxRecursionTest {
             listOf("embedded-1.xls", "embedded-2.wmf"),
             extractor.calls.map { it.resourceName },
             "同一ストレージ内は Workbook 優先・EmbeddedPress* は名前順で走査する",
+        )
+    }
+
+    @Test
+    fun delegatesMetafilePressStreamSlicedFromEmfHeader() {
+        val emfBody = "galaxy emf record".toByteArray(Charsets.ISO_8859_1)
+        val press = metafileEmfPressStream(emfBody)
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                "/EmbedItems/Embedding 1/$EMBEDDED_PRESS_NAME" to press,
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        parse(data, contextWith(extractor))
+
+        assertEquals(1, extractor.calls.size)
+        val call = extractor.calls[0]
+        assertEquals("embedded-1.emf", call.resourceName)
+        assertEquals("image/emf", call.contentType)
+        assertEquals("/EmbedItems/Embedding 1/$EMBEDDED_PRESS_NAME", call.relationshipId)
+        val expected = EMF_HEADER + emfBody
+        assertTrue(
+            call.bytes.contentEquals(expected),
+            "press ストリームは EMF ヘッダ位置から正確に切り出さなければならない",
+        )
+    }
+
+    // ---- Contents（埋め込み生画像 JPEG, PNG, BMP）の委譲 ----
+
+    @Test
+    fun delegatesContentsJpegStreamSlicedFromHeader() {
+        val jpegBody = "JFIF raw image data".toByteArray(Charsets.ISO_8859_1)
+        val contents = contentsStream(96, JPEG_HEADER + jpegBody)
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                "/EmbedItems/Embedding 1/Contents" to contents,
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        parse(data, contextWith(extractor))
+
+        assertEquals(1, extractor.calls.size)
+        val call = extractor.calls[0]
+        assertEquals("embedded-1.jpg", call.resourceName)
+        assertEquals("image/jpeg", call.contentType)
+        assertEquals("/EmbedItems/Embedding 1/Contents", call.relationshipId)
+        val expected = JPEG_HEADER + jpegBody
+        assertTrue(call.bytes.contentEquals(expected), "Contents から JPEG ヘッダ以降が切り出されること")
+    }
+
+    @Test
+    fun delegatesContentsPngStreamSlicedFromHeader() {
+        val pngBody = "IHDR PNG chunk data".toByteArray(Charsets.ISO_8859_1)
+        val contents = contentsStream(64, PNG_HEADER + pngBody)
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                "/EmbedItems/Embedding 1/Contents" to contents,
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        parse(data, contextWith(extractor))
+
+        assertEquals(1, extractor.calls.size)
+        val call = extractor.calls[0]
+        assertEquals("embedded-1.png", call.resourceName)
+        assertEquals("image/png", call.contentType)
+        val expected = PNG_HEADER + pngBody
+        assertTrue(call.bytes.contentEquals(expected), "Contents から PNG ヘッダ以降が切り出されること")
+    }
+
+    @Test
+    fun delegatesContentsBmpStreamSlicedFromHeader() {
+        val bmpBody = "BMP raster pixel bytes".toByteArray(Charsets.ISO_8859_1)
+        val contents = contentsStream(128, BMP_HEADER + bmpBody)
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                "/EmbedItems/Embedding 1/Contents" to contents,
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        parse(data, contextWith(extractor))
+
+        assertEquals(1, extractor.calls.size)
+        val call = extractor.calls[0]
+        assertEquals("embedded-1.bmp", call.resourceName)
+        assertEquals("image/bmp", call.contentType)
+        val expected = BMP_HEADER + bmpBody
+        assertTrue(call.bytes.contentEquals(expected), "Contents から BMP ヘッダ以降が切り出されること")
+    }
+
+    @Test
+    fun delegatesWorkbookContentsAndPressInPriorityOrder() {
+        val data = cfb(
+            mapOf(
+                "/DocumentText" to markerDocumentText(ROOT_TEXT),
+                "/EmbedItems/Embedding 1/Workbook" to rawBiffWorkbook("表", EMBED_CELL_1),
+                "/EmbedItems/Embedding 1/Contents" to contentsStream(64, JPEG_HEADER + "jpeg".toByteArray()),
+                "/EmbedItems/Embedding 1/$EMBEDDED_PRESS_NAME" to metafilePressStream("wmf".toByteArray()),
+            ),
+        )
+        val extractor = RecordingExtractor()
+
+        parse(data, contextWith(extractor))
+
+        assertEquals(
+            listOf("embedded-1.xls", "embedded-2.jpg", "embedded-3.wmf"),
+            extractor.calls.map { it.resourceName },
+            "同一ストレージ内は Workbook → Contents → EmbeddedPress の順序で委譲されること",
         )
     }
 
