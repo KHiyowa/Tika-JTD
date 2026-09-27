@@ -8,8 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * [GoldenCapture]（旧 `OpenJTD/scripts/capture_golden.sh` の Kotlin 版・MIGRATION.md §10.5 手順3）の
- * レイアウト契約テスト。
+ * [GoldenCapture] のレイアウト契約テスト。
  *
  * テストフィクスチャには意図的にダミーバイト列（不正な JTD ファイル）を使用（パース失敗 → exit 1・stdout 空）。
  * 実データの収集体・成否そのものは opt-in の実データレール（corpus 必須）に任せ、
@@ -35,7 +34,7 @@ class GoldenCaptureTest {
     }
 
     @Test
-    fun manifestRowOrderIsRelPathByteSortWithExportBeforeCat() {
+    fun manifestRowOrderIsRelPathByteSort() {
         val root = newTempRoot("order")
         val corpus = File(root, "testdata/corpus")
         touch(File(corpus, "z.jtd"), byteArrayOf(1, 2, 3))
@@ -47,9 +46,9 @@ class GoldenCaptureTest {
 
         val count = GoldenCapture.capture(corpus, out, root)
 
-        assertEquals(3, count, "収集対象は .jtd/.jtt/.jttc のみ（1 ファイル 2 行）")
+        assertEquals(3, count, "収集対象は .jtd/.jtt/.jttc のみ（1 ファイル 1 行）")
         val rows = File(out, "manifest.tsv").readText(Charsets.UTF_8).trimEnd('\n').split('\n')
-        assertEquals(6, rows.size)
+        assertEquals(3, rows.size)
         val expectedRels = listOf(
             "testdata/corpus/sub/first.jttc",
             "testdata/corpus/z.jtd",
@@ -57,10 +56,8 @@ class GoldenCaptureTest {
         )
         val actual = rows.map { it.split('\t') }
         for ((i, rel) in expectedRels.withIndex()) {
-            assertEquals(rel, actual[2 * i][0], "relpath は manifestRoot 基準・UTF-8 バイト順")
-            assertEquals("export", actual[2 * i][1], "同一ファイルは export 行が先")
-            assertEquals(rel, actual[2 * i + 1][0])
-            assertEquals("cat", actual[2 * i + 1][1])
+            assertEquals(rel, actual[i][0], "relpath は manifestRoot 基準・UTF-8 バイト順")
+            assertEquals("text", actual[i][1], "コマンド列は text")
         }
     }
 
@@ -74,22 +71,17 @@ class GoldenCaptureTest {
         GoldenCapture.capture(corpus, out, root)
 
         val base = "testdata_corpus_multi-sheet_broken.jtd"
-        val cat = File(out, "$base.cat.txt")
-        val export = File(out, "$base.export.txt")
-        assertTrue(cat.isFile, "cat 出力ファイル（/ → _ の写像名）")
-        assertTrue(export.isFile, "export 出力ファイル")
-        // 不正ファイル（パース失敗）時は exit 1・stdout 空（rjtd/Kotlin CLI 共通の失敗契約）
-        assertContentEquals(ByteArray(0), cat.readBytes())
-        assertContentEquals(ByteArray(0), export.readBytes())
+        val textFile = File(out, "$base.text.txt")
+        assertTrue(textFile.isFile, "text 出力ファイル（/ → _ の写像名）")
+        // 不正ファイル（パース失敗）時は exit 1・stdout 空
+        assertContentEquals(ByteArray(0), textFile.readBytes())
 
         val rows = File(out, "manifest.tsv").readLines(Charsets.UTF_8).map { it.split('\t') }
-        assertEquals(2, rows.size)
-        for ((row, cmd) in rows.zip(listOf("export", "cat"))) {
-            assertEquals("testdata/corpus/multi-sheet/broken.jtd", row[0])
-            assertEquals(cmd, row[1])
-            assertEquals("1", row[2])
-            assertEquals(shaEmpty, row[3])
-        }
+        assertEquals(1, rows.size)
+        assertEquals("testdata/corpus/multi-sheet/broken.jtd", rows[0][0])
+        assertEquals("text", rows[0][1])
+        assertEquals("1", rows[0][2])
+        assertEquals(shaEmpty, rows[0][3])
     }
 
     @Test

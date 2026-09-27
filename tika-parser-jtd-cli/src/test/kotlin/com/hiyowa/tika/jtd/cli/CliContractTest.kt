@@ -9,10 +9,9 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
- * CLI 契約テスト（移行レポート 2.5 / 第 6 節⑤⑥）。
+ * Tika CLI (`tika-app` 互換) 契約テスト。
  *
- * OpenJTD rjtd-cli の slim 契約（cat / export txt|text / sheets / help exit 0）の移植と、
- * 新 README が約束する export --format json の受け入れ。
+ * 標準オプション（--text, --metadata, --jsonRecursive, --xml, --help 等）の契約受入。
  */
 class CliContractTest {
 
@@ -56,141 +55,61 @@ class CliContractTest {
     }
 
     @Test
-    fun catPrintsBodyTextToStdout() {
-        val file = jtdFile("cat", mapOf("/DocumentText" to markerDocumentText("銀河鉄道の夜\n宮沢賢治")))
-        val (code, out, _) = run("cat", file.absolutePath)
-        assertEquals(0, code)
-        assertEquals("銀河鉄道の夜\n宮沢賢治", out.trim())
-        assertTrue(out.startsWith("銀河鉄道の夜"))
+    fun textOptionPrintsBodyTextToStdout() {
+        val file = jtdFile("text", mapOf("/DocumentText" to markerDocumentText("銀河鉄道の夜\n宮沢賢治")))
+        val (codeLong, outLong, _) = run("--text", file.absolutePath)
+        val (codeShort, outShort, _) = run("-t", file.absolutePath)
+        assertEquals(0, codeLong)
+        assertEquals(0, codeShort)
+        assertEquals(outLong, outShort)
+        assertEquals("銀河鉄道の夜\n宮沢賢治", outLong.trim())
     }
 
     @Test
-    fun catMissingFileFails() {
-        val (code, _, err) = run("cat", "/nonexistent/path/document.jtd")
+    fun missingFileFails() {
+        val (code, _, err) = run("--text", "/nonexistent/path/document.jtd")
         assertNotEquals(0, code)
         assertTrue(err.isNotEmpty(), "エラーは stderr へ")
     }
 
     @Test
-    fun exportTxtAndTextAliasesMatchCatByteForByte() {
-        val file = jtdFile("export", mapOf("/DocumentText" to markerDocumentText("カムパネルラが手をあげました。\n")))
-        val (codeCat, outCat, _) = run("cat", file.absolutePath)
-        val (codeTxt, outTxt, _) = run("export", file.absolutePath, "--format", "txt")
-        val (codeText, outText, _) = run("export", file.absolutePath, "--format", "text")
-        assertEquals(0, codeCat)
-        assertEquals(0, codeTxt)
-        assertEquals(0, codeText)
-        assertEquals(outCat, outTxt)
-        assertEquals(outTxt, outText)
-    }
-
-    @Test
-    fun exportRejectsNonTextFormats() {
-        val file = jtdFile("reject", mapOf("/DocumentText" to markerDocumentText("ジョバンニ\n")))
-        for (fmt in listOf("pdf", "html", "md", "docx")) {
-            val (code, _, err) = run("export", file.absolutePath, "--format", fmt)
-            assertNotEquals(0, code, "--format $fmt は拒否すべき")
-            assertTrue(err.contains("unsupported"), "actual: $err")
-        }
-    }
-
-    @Test
-    fun exportJsonEmitsMetadataAndText() {
-        val file = jtdFile("json", mapOf("/DocumentText" to markerDocumentText("銀河鉄道の夜\n宮沢賢治")))
-        val (code, out, _) = run("export", file.absolutePath, "--format", "json")
+    fun metadataOptionEmitsMetadata() {
+        val file = jtdFile("meta", mapOf("/DocumentText" to markerDocumentText("ジョバンニ")))
+        val (code, out, _) = run("--metadata", file.absolutePath)
         assertEquals(0, code)
-        // Jackson 等に依存しない最小 JSON: text と metadata を含む
-        assertTrue(out.trimStart().startsWith("{") && out.trimEnd().endsWith("}"), "actual: $out")
-        assertTrue(out.contains("\"text\""), "actual: $out")
-        assertTrue(out.contains("銀河鉄道の夜"), "actual: $out")
-        assertTrue(out.contains("application/vnd.justsystem.ichitaro"), "actual: $out")
+        assertTrue(out.contains("Content-Type: application/vnd.justsystem.ichitaro") || out.contains("application/vnd.justsystem.ichitaro"), "actual: $out")
     }
 
     @Test
-    fun exportSheetSelectsByIndexAndName() {
-        val docItemInfo = mutableListOf<Byte>()
-        fun le32(v: Long) = listOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(), ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte())
-        docItemInfo.addAll(le32(1))
-        docItemInfo.addAll(le32(1))
-        val name = "二、活版所".toByteArray(Charsets.UTF_16LE)
-        docItemInfo.addAll(le32((name.size / 2).toLong()))
-        docItemInfo.addAll(name.toList())
-        docItemInfo.addAll(le32(7))
-        docItemInfo.addAll(ByteArray(26).toList())
-
-        val file = jtdFile(
-            "sheets",
-            mapOf(
-                "/DocumentText" to markerDocumentText("銀河鉄道の夜\n宮沢賢治"),
-                "/ObjectSheets/DocSheet/DocItemInfo" to docItemInfo.toByteArray(),
-                "/ObjectSheets/DocSheet/DOCS_0007/DocumentText" to markerDocumentText("ジョバンニは窓をあけました。\n"),
-            ),
-        )
-
-        val (codeIdx, outIdx, _) = run("export", file.absolutePath, "--format", "txt", "--sheet", "1")
-        assertEquals(0, codeIdx)
-        assertEquals("ジョバンニは窓をあけました。", outIdx.trim())
-
-        val (codeName, outName, _) = run("export", file.absolutePath, "--format", "txt", "--sheet", "二、活版所")
-        assertEquals(0, codeName)
-        assertEquals(outIdx, outName)
-    }
-
-    @Test
-    fun sheetsListsTsvRows() {
-        val file = jtdFile(
-            "sheetslist",
-            mapOf(
-                "/DocumentText" to markerDocumentText("銀河鉄道の夜\n"),
-                "/ObjectSheets/DocSheet/DocItemInfo" to run {
-                    val d = mutableListOf<Byte>()
-                    fun le32(v: Long) = listOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(), ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte())
-                    d.addAll(le32(1))
-                    d.addAll(le32(1))
-                    val name = "一、午後の授業".toByteArray(Charsets.UTF_16LE)
-                    d.addAll(le32((name.size / 2).toLong()))
-                    d.addAll(name.toList())
-                    d.addAll(le32(0))
-                    d.addAll(ByteArray(26).toList())
-                    d.toByteArray()
-                },
-            ),
-        )
-        val (code, out, _) = run("sheets", file.absolutePath)
+    fun jsonRecursiveOptionEmitsJson() {
+        val file = jtdFile("json", mapOf("/DocumentText" to markerDocumentText("カムパネルラ")))
+        val (code, out, _) = run("--jsonRecursive", file.absolutePath)
         assertEquals(0, code)
-        // 末尾改行だけを除去する（trimEnd は末尾タブも削ってしまうため不可）
-        val lines = out.removeSuffix("\n").split('\n')
-        assertEquals(2, lines.size)
-        assertEquals("sheet\t0\tタイトル\t\t", lines[0])
-        assertEquals("sheet\t1\t一、午後の授業\t/ObjectSheets/DocSheet/DOCS_0000\t", lines[1])
+        assertTrue(out.trimStart().startsWith("[") || out.trimStart().startsWith("{"), "JSON 出力であること: $out")
+        assertTrue(out.contains("カムパネルラ"), "抽出テキストが含まれること: $out")
     }
 
     @Test
-    fun helpExitsZeroForTikaHealthCheck() {
-        for (arg in listOf("help", "-h", "--help")) {
+    fun xmlOptionEmitsXhtml() {
+        val file = jtdFile("xml", mapOf("/DocumentText" to markerDocumentText("白鳥の停車場")))
+        val (code, out, _) = run("--xml", file.absolutePath)
+        assertEquals(0, code)
+        assertTrue(out.contains("<html") && out.contains("白鳥の停車場"), "XHTML 出力であること: $out")
+    }
+
+    @Test
+    fun helpExitsZero() {
+        for (arg in listOf("help", "-h", "--help", "-?")) {
             val (code, out, _) = run(arg)
             assertEquals(0, code, "$arg は exit 0")
-            assertTrue(out.contains("cat") && out.contains("export") && out.contains("sheets"))
+            assertTrue(out.contains("usage: java -jar tika-app.jar") || out.contains("--text") || out.contains("-t"), "actual: $out")
         }
     }
 
     @Test
-    fun unknownCommandOrNoArgsExitsNonZero() {
-        val (codeNo, _, _) = run()
+    fun noArgsExitsNonZero() {
+        val (codeNo, _, err) = run()
         assertNotEquals(0, codeNo)
-        val (codeUnknown, _, err) = run("frobnicate", "x")
-        assertNotEquals(0, codeUnknown)
         assertTrue(err.isNotEmpty())
-    }
-
-    @Test
-    fun brokenJttcFailsGracefully() {
-        // 不正 JTTC（JSCompDocument だが -lh5- ヘッダが壊れている）は nonzero で失敗
-        val comp = byteArrayOf(0x26, 0x00) + "JustCompressedDocument".toByteArray(Charsets.ISO_8859_1) +
-            byteArrayOf(0x00) + "-lh5-".toByteArray(Charsets.ISO_8859_1) + byteArrayOf(0x00) + "broken".toByteArray(Charsets.ISO_8859_1)
-        val file = jtdFile("broken", mapOf("/JSCompDocument" to comp))
-        val (code, _, err) = run("cat", file.absolutePath)
-        assertNotEquals(0, code)
-        assertTrue(err.contains("invalid data"), "actual: $err")
     }
 }

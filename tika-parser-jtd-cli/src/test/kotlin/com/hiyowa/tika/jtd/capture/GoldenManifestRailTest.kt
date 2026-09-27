@@ -37,14 +37,14 @@ class GoldenManifestRailTest {
         val rows = manifest.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
         assertTrue(rows.isNotEmpty(), "manifest が空")
 
-        val mismatches = mutableListOf<String>()
-        for (row in rows) {
+        val mismatches = rows.parallelStream().map { row ->
             val (rel, command, expectedExit, expectedSha) = row.split('\t')
             val source = File(root, rel)
-            assertTrue(source.isFile, "コーパス入力が見つからない: $rel")
+            if (!source.isFile) {
+                return@map "コーパス入力が見つからない: $rel"
+            }
             val args = when (command) {
-                "export" -> listOf("export", source.absolutePath, "--format", "txt")
-                "cat" -> listOf("cat", source.absolutePath)
+                "text" -> listOf("--text", source.absolutePath)
                 else -> error("unknown cmd in manifest: $command")
             }
             val stdout = ByteArrayOutputStream()
@@ -53,13 +53,14 @@ class GoldenManifestRailTest {
                 .digest(stdout.toByteArray())
                 .joinToString("") { "%02x".format(it) }
             if (exit.toString() != expectedExit || sha != expectedSha) {
-                mismatches.add("$rel $command: exit $exit/$expectedExit sha $sha/$expectedSha")
+                return@map "$rel $command: exit $exit/$expectedExit sha $sha/$expectedSha"
             }
             val goldenFile = File(golden, rel.replace('/', '_') + ".$command.txt")
             if (!goldenFile.isFile || !goldenFile.readBytes().contentEquals(stdout.toByteArray())) {
-                mismatches.add("${goldenFile.name}: golden 本体が再生成結果と不一致")
+                return@map "${goldenFile.name}: golden 本体が再生成結果と不一致"
             }
-        }
+            null
+        }.filter { it != null }.toList()
         assertEquals(emptyList(), mismatches, "golden レール不一致 ${mismatches.size} 件")
     }
 }

@@ -1,7 +1,14 @@
+plugins {
+    id("com.gradleup.shadow")
+}
+
+val tikaVersion = "4.0.0"
 val poiVersion = "5.5.1"
 
 dependencies {
     implementation(project(":tika-parser-jtd"))
+    // フル機能 Tika CLI および全パーサー群
+    implementation("org.apache.tika:tika-app:$tikaVersion")
     // JtdContainerReader の公開 API（withFileSystem）が POIFSFileSystem を露出するため、
     // サブシート本体の読み出しに直接アクセスする本 CLI は POI をコンパイル期に必要とする
     // （実行期は :tika-parser-jtd 経由で同一バージョンが classpath に載る）。
@@ -32,21 +39,12 @@ tasks.jar {
     }
 }
 
-// 依存関係をすべて内包した単体実行可能 JAR（java -jar 1本で動作可能）
-val standaloneJar by tasks.registering(Jar::class) {
-    group = "build"
-    description = "Assembles a standalone, fat executable JAR containing all dependencies."
+// 依存関係をすべて内包した単体実行可能 Fat JAR（java -jar 1本で全パーサー・CLIが動作可能）
+tasks.shadowJar {
     archiveClassifier.set("standalone")
+    mergeServiceFiles() // SPI定義を正しく連結マージ
     manifest {
         attributes("Main-Class" to "com.hiyowa.tika.jtd.cli.MainKt")
-    }
-    from(sourceSets["main"].output)
-    dependsOn(configurations.runtimeClasspath)
-    from({
-        configurations.runtimeClasspath.get().filter { it.name.endsWith(".jar") }.map { zipTree(it) }
-    }) {
-        exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
 }
 
@@ -62,7 +60,7 @@ val distZip by tasks.registering(Zip::class) {
 }
 
 tasks.assemble {
-    dependsOn(standaloneJar, distZip)
+    dependsOn(tasks.shadowJar, distZip)
 }
 
 // ローカルコーパス（git 未追跡・opt-in）から golden を採取する開発タスク（MIGRATION.md §10.5）

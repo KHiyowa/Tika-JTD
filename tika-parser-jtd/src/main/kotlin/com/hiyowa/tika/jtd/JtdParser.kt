@@ -85,6 +85,17 @@ class JtdParser : Parser {
                 headerText?.let { "$it\n\n" }.orEmpty() + combinedText + boxSuffix,
             )
         }
+
+        // 6. オブジェクト枠（ObjectBox）の埋め込みドキュメント抽出と委譲
+        val parseContext = context ?: ParseContext()
+        val extractor = org.apache.tika.extractor.EmbeddedDocumentUtil.getEmbeddedDocumentExtractor(parseContext)
+        ObjectBoxExtractor.extractEmbeddedDocuments(
+            data = data,
+            handler = xhtml,
+            extractor = extractor,
+            context = parseContext,
+        )
+
         xhtml.endElement("body")
         xhtml.endDocument()
     }

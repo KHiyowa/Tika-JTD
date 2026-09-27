@@ -1,26 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   一太郎文書 (JTD) のカスタム MIME 登録。
-
-  ※ 読み込み先はクラスパスルートの "custom-mimetypes.xml"（Tika 4.0.0 の
-    MimeTypesFactory が classLoader.getResources("custom-mimetypes.xml") で読む）。
-    core が読む base 用の org/apache/tika/mime/tika-mimetypes.xml 配下とは別。
-
-  ※ magic は付けない。CFB offset マジックは core 側の application/x-tika-msoffice
-    （CFB マジック priority 40）と衝突するため。代わりに glob（拡張子）で登録し、
-    sub-class-of で既存の OLE2 容器族に位置づける（core には汎用 OLE2 容器型
-    application/x-ole-storage が存在しないため x-tika-msoffice を使う）。
-    これで resourceName が .jtd/.jtt/.jttc だと MimeTypes.detect が
-    application/vnd.justsystem.ichitaro を返し、本体 JtdParser の
-    getSupportedTypes（vnd.justsystem.ichitaro / x-ole-storage / octet-stream）
-    と JtdFormatDetector の CFB 判定でパースされる。
+  OpenWebUI 等のヘッダーレス送信環境に対応するため、CFB コンテナ内部の
+  一太郎固有ストリームマーカー（SsmgV.01, DocumentText 等）による
+  マジックバイト判定（priority 60 > default 40）を定義。
 -->
-<mime-types>
+<mime-info>
   <mime-type type="application/vnd.justsystem.ichitaro">
     <_comment>一太郎ドキュメント</_comment>
     <sub-class-of type="application/x-tika-msoffice"/>
+    <alias type="application/x-jtd"/>
+    <alias type="application/x-ichitaro-jtd"/>
+    <alias type="application/jtd"/>
     <glob pattern="*.jtd"/>
+    <glob pattern="*.JTD"/>
     <glob pattern="*.jtt"/>
+    <glob pattern="*.JTT"/>
     <glob pattern="*.jttc"/>
+    <glob pattern="*.JTTC"/>
+    <magic priority="60">
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="SsmgV.01" type="string" offset="512:65536"/>
+      </match>
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="DocumentText" type="unicodeLE" offset="512:65536"/>
+      </match>
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="JSSlip" type="unicodeLE" offset="512:65536"/>
+      </match>
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="JustCompressedDocument" type="string" offset="512:65536"/>
+      </match>
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="JSCompDocument" type="unicodeLE" offset="512:65536"/>
+      </match>
+      <match value="0xd0cf11e0a1b11ae1" type="string" offset="0:8">
+        <match value="-lh5-" type="string" offset="512:65536"/>
+      </match>
+    </magic>
   </mime-type>
-</mime-types>
+</mime-info>

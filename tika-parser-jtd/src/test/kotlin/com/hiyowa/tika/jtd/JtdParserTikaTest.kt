@@ -78,6 +78,7 @@ class JtdParserTikaTest {
         }
 
         assertContains(handler.toString(), "銀河鉄道")
+        assertEquals("application/vnd.justsystem.ichitaro", metadata.get("Content-Type"))
     }
 
     @Test
