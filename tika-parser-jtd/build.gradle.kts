@@ -1,4 +1,5 @@
 plugins {
+    id("com.gradleup.shadow")
     id("com.vanniktech.maven.publish")
 }
 
@@ -50,5 +51,18 @@ mavenPublishing {
             developerConnection.set("scm:git:ssh://github.com/KHiyowa/tika-jtd.git")
             url.set("https://github.com/KHiyowa/tika-jtd")
         }
+    }
+}
+
+tasks.jar {
+    enabled = false
+}
+
+tasks.shadowJar {
+    archiveClassifier.set("")
+    mergeServiceFiles()
+    dependencies {
+        include(dependency("org.jetbrains.kotlin:kotlin-stdlib.*"))
+        include(dependency("org.jetbrains:annotations.*"))
     }
 }
