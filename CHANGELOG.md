@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-28
+
+### 不具合修正
+- **公式 Tika Server へのドロップインで動作しない問題の修正（Kotlin 標準ライブラリの内包）**:
+  - `tika-parser-jtd` 配布 JAR に、公式 Tika コンテナ（`apache/tika`）側に同梱されていない `kotlin-stdlib` が入っておらず、JAR 1本で動かない問題が発生していました。`kotlin-stdlib` および `annotations` を最小限バンドルする Shadow JAR 構成へ変更しました。
+  - これにより、Tika Server の `/tika-extras/` に別途 `kotlin-stdlib.jar` を配置する必要がなくなり、**`tika-parser-jtd.jar` 1本を配置・マウントするだけ** で即座に稼働できるようになりました。
+
 ## [0.2.0] - 2026-09-27
 
 ### 追加
@@ -48,6 +55,7 @@
 - 公式 Tika Server コンテナ（`/tika-extras`）への JAR ドロップインによる自動認識機構（MIME 型定義 `custom-mimetypes.xml` および ServiceLoader 設定の内包）。
 - 初期 CLI ツール（`cat`, `export`, `sheets` サブコマンド）。
 
-[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/KHiyowa/tika-jtd/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/KHiyowa/tika-jtd/releases/tag/v0.1.0
