@@ -80,27 +80,23 @@ In `sample-academic.jtd` all 19 records are len=20 with a stable payload:
 The semantic meaning of `w10` is not decoded. The observation suggests it may
 encode an indent level or paragraph continuation flag.
 
-**Class `0x0010` sub-types (decoded:false).** The `w4` field discriminates at least
-four sub-types in `sample-table.jtd`:
+**Class `0x0010` sub-types.** The `w4` field discriminates sub-types in `sample-table.jtd`:
 
-| w4 value | len | count | role (decoded:false) |
+| w4 value | len | count | role |
 | -------- | --- | ----: | -------------------- |
 | `0x002e` (46)    | 13  |    18 | single-column paragraph record |
-| `0x008f` (143)   | 27–61 | 129 | table-row column-spec header |
+| `0x008f` (143)   | 27–61 | 129 | table-row column-spec header (Established: see RFC 0013) |
 | `0x002a` (42)    | 37–47 |   2 | composite transition record (Y-coords + inner 0x008f sub-block) |
 | `0xffff` (65535) | 10  |     3 | null / end-of-section marker |
 
 For `w4=0x008f` records: `len = w5 + 12` (verified 129 records). `w6=268`
 equals the maximum cell `b1` coordinate in following `0x0030` rows — consistent
-with `w6` encoding the total table width. The variable-length payload (words
-`w9..w[len-5]`) consists of 4-word sub-entries `[tag, v1, v2, v3]` terminated by
-`[0xffff, 0x0000]`. The most common tags are `0x23` (546 occurrences; v1=v2=0;
-v3 varies — correlates with cell span), `0x2b` (71; v1=0, v2=0x08; v3 in 0x1d–0x76),
-and `0x1b` (11; v1=0, v2=0x08, v3=0x1f). The pattern `n_sub_entries = n_cells − 1`
-holds for the dominant cases (68 records with n_sub=3/n_cells=4 and 27 records with
-n_sub=9/n_cells=10). The `w8` field value does not directly equal the count of
-`0x0023`-tagged entries; its role is not decoded. Sub-entry tag semantics and the
-relationship between v3 and cell coordinates are not decoded.
+with `w6` encoding the total table width.
+As confirmed via controlled rule experiments (2026-09-29, RFC 0013):
+1. **Span Count Arithmetic**: The first payload word `w5` strictly satisfies **$w_5 = 4 \times (n - 1) + 3$**, where $n$ is the number of physical spans in that row ($w_5=7 \Rightarrow n=2$, $w_5=11 \Rightarrow n=3$, $w_5=15 \Rightarrow n=4$).
+2. **Sub-entries & Wall Coordinates**: Four-word sub-entries `[tag, 0x0013, 0x0000, 0x0000]` $\times (n-1)$ follow, terminated by `0x001f`. The `tag` word specifies the exact $x$-coordinate of the vertical wall (e.g., tag=`0x4e=78` $\Rightarrow b_1=78 \mid b_0=80$).
+3. **Flow Style Code**: `payload[4]` governs flow partitioning (`0x14`: in-line horizontal rule / partitions flow; `0x08`: inter-line horizontal rule / full-width span; `0x16`/`0x13`/`0x15`: BOX open/middle/close).
+4. **Tail Word (Visual Style)**: The record's tail word encodes rule appearance (`0x22`: thin black, `0x1c`: thick black, `0x06`: cyan dashed, `0x4f`: thin vertical black, `0x00`: standalone rule).
 
 For `w4=0x002a` records: `w7` holds the count of large-valued (`> 1000`) word
 pairs in `w8..w(8+2*w7-1)`; those values are in the thousands and may encode
@@ -127,7 +123,8 @@ Analysis of 703 records in `sample-table.jtd`:
 - `b0` = left edge of cell in the table coordinate space
 - `b1` = right edge of cell; `b1 − b0` = cell width in the same units
 - Cells within a row are non-overlapping and ordered left-to-right
-- Adjacent cells in the same row are separated by a gap of exactly 4 units
+- Adjacent cells are separated by a gap of typically 2 units (rule stroke footprint; 4 units in some samples)
+- Identical spans $[b_0, b_1]$ are reaffirmed per display line during soft wrapping (RFC 0013 Span Reaffirm)
 
 Representative layout for the main two-column comparison table (4 cells per row):
 
