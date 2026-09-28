@@ -32,7 +32,7 @@
 ```bash
 docker run -d --name tika \
   -p 9998:9998 \
-  -v "$PWD/jars/tika-parser-jtd-0.2.1.jar:/tika-extras/tika-parser-jtd.jar:ro" \
+  -v "$PWD/jars/tika-parser-jtd-0.2.2-server.jar:/tika-extras/tika-parser-jtd.jar:ro" \
   apache/tika:latest-full
 ```
 
@@ -97,7 +97,7 @@ java -Dtika.extras.dir=./jars \
 // build.gradle.kts
 dependencies {
     implementation("org.apache.tika:tika-core:4.0.0")
-    implementation("com.hiyowa:tika-parser-jtd:0.2.1")
+    implementation("com.hiyowa:tika-parser-jtd:0.2.2")
 }
 ```
 
@@ -131,33 +131,33 @@ fun main() {
 
 ### 1.3 CLI による単体抽出 (Standalone CLI)
 
-GitHub Releases から `tika-parser-jtd-cli-0.2.1-standalone.jar`（すべての依存関係と全 Tika パーサーを内包した単体実行可能 Fat JAR）をダウンロードすれば、Apache Tika 公式 CLI（`tika-app`）と同一のインターフェースで単体実行できます。
+GitHub Releases から `tika-parser-jtd-cli-0.2.2-standalone.jar`（すべての依存関係と全 Tika パーサーを内包した単体実行可能 Fat JAR）をダウンロードすれば、Apache Tika 公式 CLI（`tika-app`）と同一のインターフェースで単体実行できます。
 
 一太郎文書（`.jtd` / `.jtt` / `.jttc`）はもちろん、Tika がサポートする全形式を本 JAR 1 本で処理可能です。
 
 ```bash
 # プレーンテキスト抽出（標準出力）
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --text path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --text path/to/document.jtd
 # または短縮形: -t
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar -t path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -t path/to/document.jtd
 
 # メタデータ一覧の出力
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --metadata path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --metadata path/to/document.jtd
 # または短縮形: -m
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar -m path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -m path/to/document.jtd
 
 # 構造化 JSON 出力（埋め込みメタデータ・テキスト）
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --jsonRecursive path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --jsonRecursive path/to/document.jtd
 # または短縮形: -J
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar -J path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -J path/to/document.jtd
 
 # XHTML 出力
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --xml path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --xml path/to/document.jtd
 # または短縮形: -x
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar -x path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -x path/to/document.jtd
 
 # ヘルプと全オプションの表示
-java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --help
+java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --help
 ```
 
 ---
@@ -168,8 +168,8 @@ java -jar tika-parser-jtd-cli-0.2.1-standalone.jar --help
 * **Apache Tika:** 4.0.0 以上
 
 > [!IMPORTANT]
-> **ライブラリ出力形式について（v0.2.1 現在）:**  
-> 現行バージョン（v0.2.1）の `JtdParser` コアライブラリでは、検索インデックスや RAG パイプラインでの利用を主眼としており、**Tika のプレーンテキスト抽出およびメタデータ抽出に対応**しています（次期バージョンにて構造化 XHTML 出力への対応を推進中）。CLI ツール側では Tika のフレームワーク経由で `--xml` や `--jsonRecursive` の出力が可能です。
+> **ライブラリ出力形式について（v0.2.2 現在）:**  
+> 現行バージョン（v0.2.2）の `JtdParser` コアライブラリでは、検索インデックスや RAG パイプラインでの利用を主眼としており、**Tika のプレーンテキスト抽出およびメタデータ抽出に対応**しています（次期バージョンにて構造化 XHTML 出力への対応を推進中）。CLI ツール側では Tika のフレームワーク経由で `--xml` や `--jsonRecursive` の出力が可能です。
 
 > [!NOTE]
 > **Tika 3系へのバックポートについて:**  

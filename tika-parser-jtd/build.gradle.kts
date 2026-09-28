@@ -54,12 +54,16 @@ mavenPublishing {
     }
 }
 
+// Maven Central 公開およびプロジェクト間依存用の標準 Thin JAR（tika-parser-jtd-<version>.jar）
+// 依存関係（kotlin-stdlib, poi 等）は pom.xml を通じて解決させ、JAR Hell を防止する
 tasks.jar {
-    archiveClassifier.set("thin")
+    archiveClassifier.set("")
 }
 
+// 公式 Tika Server / Docker（/tika-extras）用のドロップイン JAR（tika-parser-jtd-<version>-server.jar）
+// Tika 本体に含まれない kotlin-stdlib のみを内包し、JAR 1本でのポン置き動作を可能にする
 tasks.shadowJar {
-    archiveClassifier.set("")
+    archiveClassifier.set("server")
     mergeServiceFiles()
     dependencies {
         include(dependency("org.jetbrains.kotlin:kotlin-stdlib.*"))
