@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-28
+
+### 破壊的変更
+- **公式 Tika Server 用ドロップイン JAR のファイル名変更 (`tika-parser-jtd-*-server.jar`)**:
+  - Maven Central に公開される主成果物（`tika-parser-jtd-0.2.2.jar`）が標準の Thin JAR となるようファイル名を整理しました。
+  - これに伴い、公式 Tika Server（`/tika-extras`）および Docker コンテナへの配置を目的とした、`kotlin-stdlib` 内包版のドロップイン JAR ファイル名を **`tika-parser-jtd-<version>-server.jar`** へ変更しました。
+  - 外部スクリプトや Dockerfile 等で GitHub Releases から直接パーサー JAR を取得している場合は、対象ファイル名を `-server.jar` に更新する必要があります。
+
+### 改善
+- **リリースアセットの整理**:
+  - GitHub Releases の配布アセットから不要な補助 JAR を排除し、「Tika Server 用ドロップイン JAR（`tika-parser-jtd-*-server.jar`）」および「スタンドアロン CLI（`tika-parser-jtd-cli-*`）」の 3 成果物に厳選して明確化しました。
+
 ## [0.2.1] - 2026-09-28
 
 ### 不具合修正
@@ -55,7 +67,8 @@
 - 公式 Tika Server コンテナ（`/tika-extras`）への JAR ドロップインによる自動認識機構（MIME 型定義 `custom-mimetypes.xml` および ServiceLoader 設定の内包）。
 - 初期 CLI ツール（`cat`, `export`, `sheets` サブコマンド）。
 
-[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/KHiyowa/tika-jtd/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/KHiyowa/tika-jtd/releases/tag/v0.1.0

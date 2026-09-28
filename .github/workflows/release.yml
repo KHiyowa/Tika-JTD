@@ -39,16 +39,14 @@ jobs:
       - name: Prepare Release Assets
         run: |
           mkdir -p release-assets
-          # Tika Parser JAR (tika-server / library drop-in)
-          cp tika-parser-jtd/build/libs/tika-parser-jtd-[0-9]*.jar release-assets/
+          # Tika Parser Server Drop-in JAR (bundles kotlin-stdlib for /tika-extras/)
+          cp tika-parser-jtd/build/libs/tika-parser-jtd-*-server.jar release-assets/
           # CLI Standalone Executable JAR (single fat jar, java -jar executable)
           cp tika-parser-jtd-cli/build/libs/tika-parser-jtd-cli-*-standalone.jar release-assets/
           # CLI Distribution Zip (jar + runtime-classpath/)
           if [ -d tika-parser-jtd-cli/build/distributions ]; then
             cp tika-parser-jtd-cli/build/distributions/tika-parser-jtd-cli-*.zip release-assets/ || true
           fi
-          # Exclude source JARs from release assets
-          rm -f release-assets/*-sources.jar
           echo "=== Release Assets ==="
           ls -lh release-assets/
 
