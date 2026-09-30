@@ -6,7 +6,7 @@ Observed: 2026-09-20
 
 ## Summary
 
-Ichitaro (Justsystem Ichitaro) document files (JTD / JTT) support multi-sheet documents where multiple documents, tables, or notes are stored within a single file in a tabbed interface.
+Ichitaro (JustSystems Ichitaro) document files (JTD / JTT) support multi-sheet documents where multiple documents, tables, or notes are stored within a single file in a tabbed interface.
 
 While single-sheet documents store their main body text stream under the root CFB path `/DocumentText`, multi-sheet documents organize content as follows:
 - The root `/DocItemInfo` stream contains metadata for each sheet (sheet name, original file path, internal storage identifiers, GUIDs, etc.).

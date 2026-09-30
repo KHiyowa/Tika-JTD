@@ -179,7 +179,7 @@ style:font-decl
 
 Independent clean-room evidence from JXW.Application COM automation confirms the Ichitaro text export path without depending on the DLL binary.
 
-JustSystem exposes a registered COM ProgID:
+JustSystems exposes a registered COM ProgID:
 
 ```text
 JXW.Application

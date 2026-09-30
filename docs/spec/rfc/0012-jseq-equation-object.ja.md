@@ -8,7 +8,7 @@ English version: [0012-jseq-equation-object.md](0012-jseq-equation-object.md)
 
 ## 概要
 
-一太郎（Justsystem 一太郎）の文書（JTD / JTT）において、JS 数式作成ツール（「はかどる！数式メーカー」等）によって作成された数式は、**「JSEQ 数式オブジェクト枠（`JSEQ.Document.3`）」** として OLE2 サブストレージ内に保持される。
+一太郎（JustSystems 一太郎）の文書（JTD / JTT）において、JS 数式作成ツール（「はかどる！数式メーカー」等）によって作成された数式は、**「JSEQ 数式オブジェクト枠（`JSEQ.Document.3`）」** として OLE2 サブストレージ内に保持される。
 
 本仕様は、数式オブジェクト枠の OLE2 コンテナ階層、ストリーム構成、および数式本体モデルを格納する `JSEQ3Contents`（マジック `"MATH.VAF"`）の内部バイナリ構造を定義・標準化するものである。
 

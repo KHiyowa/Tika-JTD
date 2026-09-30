@@ -177,7 +177,7 @@ style:font-decl
 
 `JXW.Application` COM automation による独立したクリーンルーム証拠が、DLL バイナリに依存せず Ichitaro text export パスを確認する。
 
-JustSystem は登録済み COM ProgID を公開している。
+JustSystems は登録済み COM ProgID を公開している。
 
 ```text
 JXW.Application

@@ -71,7 +71,7 @@ java -cp "/opt/tika-server/*:/opt/tika-server/lib/*:/tika-extras/*" \
 ```
 
 1. **`META-INF/services/org.apache.tika.parser.Parser`**: ServiceLoader が `com.hiyowa.tika.jtd.JtdParser` を自動登録し、`AutoDetectParser`（およびサーバーのパーサーチェーン）が `.jtd` を受け取るようになります。
-2. **JAR ルートの `custom-mimetypes.xml`**: `application/vnd.justsystem.ichitaro`（glob: `*.jtd` / `*.jtt` / `*.jttc`）の MIME 定義が自動マージされます。外部の設定ファイル編集は不要です。
+2. **JAR ルートの `custom-mimetypes.xml`**: `application/vnd.justsystems.ichitaro`（glob: `*.jtd` / `*.jtt` / `*.jttc`）の MIME 定義が自動マージされます。外部の設定ファイル編集は不要です。
 3. **純粋 JVM 実装**: OLE2 容器の解析は JVM 版 Apache POI が行うため、コンテナ内に Rust バイナリやネイティブ共有ライブラリを配置する必要がありません。
 
 > [!NOTE]

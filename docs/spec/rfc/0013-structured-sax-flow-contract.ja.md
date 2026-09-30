@@ -9,7 +9,7 @@ English version: [0013-structured-sax-flow-contract.md](0013-structured-sax-flow
 
 ## 概要
 
-一太郎（Justsystem 一太郎）の文書（JTD / JTT）において、画面上に引かれた**「罫線」**は、Microsoft Word のような入れ子型の表セル（Box モデル：`Document → Table → Row → Cell`）でもなければ、独立した図形・テキストボックス（「レイアウト枠」）でもない。
+一太郎（JustSystems 一太郎）の文書（JTD / JTT）において、画面上に引かれた**「罫線」**は、Microsoft Word のような入れ子型の表セル（Box モデル：`Document → Table → Row → Cell`）でもなければ、独立した図形・テキストボックス（「レイアウト枠」）でもない。
 
 一太郎において**「罫線」と「枠（レイアウト枠・オブジェクト枠）」は全く異なる概念**である：
 * **枠（レイアウト枠・オブジェクト枠）**: 用紙上に配置される独立した矩形オブジェクトであり、別ストリーム（`/LayoutBoxText`、`/LayoutBox`、`/Frame`、あるいは OLE2 サブストレージ）として本文から完全に分離して管理される。

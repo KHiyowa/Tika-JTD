@@ -6,7 +6,7 @@
   マジックバイト判定（priority 60 > default 40）を定義。
 -->
 <mime-info>
-  <mime-type type="application/vnd.justsystem.ichitaro">
+  <mime-type type="application/vnd.justsystems.ichitaro">
     <_comment>一太郎ドキュメント</_comment>
     <sub-class-of type="application/x-tika-msoffice"/>
     <alias type="application/x-jtd"/>

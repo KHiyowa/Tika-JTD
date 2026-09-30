@@ -275,7 +275,7 @@ class JtdParser : Parser {
     }
 
     private companion object {
-        const val MIME_JTD = "application/vnd.justsystem.ichitaro"
+        const val MIME_JTD = "application/vnd.justsystems.ichitaro"
         const val MIME_OLE_STORAGE = "application/x-ole-storage"
         const val MIME_OCTET_STREAM = "application/octet-stream"
         const val KEY_JTD_FORMAT = "X-JTD-Format"

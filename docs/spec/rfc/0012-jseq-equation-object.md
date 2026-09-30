@@ -8,7 +8,7 @@ Japanese version: [0012-jseq-equation-object.ja.md](0012-jseq-equation-object.ja
 
 ## Abstract
 
-In Ichitaro documents (JTD / JTT), mathematical formulas created by the Justsystem Equation Editor (e.g., "Hakadoru! Equation Maker" / JSEQ3) are stored within OLE2 substorages as **"JSEQ Equation ObjectBoxes (`JSEQ.Document.3`)"**.
+In Ichitaro documents (JTD / JTT), mathematical formulas created by the JustSystems Equation Editor (e.g., "Hakadoru! Equation Maker" / JSEQ3) are stored within OLE2 substorages as **"JSEQ Equation ObjectBoxes (`JSEQ.Document.3`)"**.
 
 This specification defines and standardizes the OLE2 container hierarchy, stream layout, and internal binary format of `JSEQ3Contents` (magic `"MATH.VAF"`), which houses the mathematical expression model.
 
