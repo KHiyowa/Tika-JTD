@@ -19,14 +19,21 @@ import org.xml.sax.ContentHandler
  * 2. [JtdFormatDetector.detect] で形式を判定し、必須 metadata を設定
  *    （`X-JTD-Format` と `Content-Type`）。
  * 3. [JtdFormat.UNKNOWN] は [UnsupportedFormatException] をスロー。
- * 4. [DocumentTextParser.readDocumentTextPayload]（3 経路フォールバック）で DocumentText
- *    をサルベージし平文化する。
- * 5. [ObjectSheetsReader.readDocumentSheets] でシート列を取得し、[buildCombinedText] が
- *    model（rjtd-model `Document::plain_text`）と同一規則で本文を組み立てる
- *    （通常文書なら従来出力+脚注、マルチシートならシート名単独行+シート間 `\n\n` 連結）。
+ * 4. [extractPayloadBytes]（[DocumentTextParser.readDocumentTextPayload] の 3 経路フォールバック）
+ *    で DocumentText をサルベージする（[DocumentTextPayload] を保持）。
+ * 5. [ObjectSheetsReader.readDocumentSheets] でシート列を取得する。
+ *    - シート 2 以上（マルチシート）→ シート毎 `<div class="sheet">`＋`<h2>{シート名}</h2>`
+ *      で区切り、シート本体は流路構造化（[RuleFlowParser] → [RuleFlowAssembler]）が
+ *      ブロック列を産出できたら [FlowSaxEmitter]、不能なら平文 `<p>` で emit
+ *      （RFC 0013 Phase 3。脚注はシート内末尾 `<p>`、枠注記は sheet 列の後に共用 emit）。
+ *      全シートの emit 計画を立ててから emit する（途中失敗なら旧フォールバックへ）。
+ *    - シート 1 つ以下で流路構造化がブロック列を産出できた場合 →
+ *      [FlowSaxEmitter] で XHTML の `<p>` / `<table>` 構造を emit
+ *      （RFC 0013 Phase 2。脚注・枠注記は従来契約のまま末尾に続ける）。
+ *    - それ以外（構造化空・失敗）→ フォールバックで [buildCombinedText] の
+ *      平文 1 ノード出力（model（rjtd-model `Document::plain_text`）と同一規則:
+ *      通常文書なら従来出力+脚注、マルチシートならシート名単独行+シート間 `\n\n` 連結）。
  * 6. [XHTMLContentHandler] 経由で SAX 出力する。
- *
- * ※ 段落分割・table・ruby の構造化は Step4 以降（[TODO] コメント参照）。
  */
 class JtdParser : Parser {
 
@@ -56,8 +63,8 @@ class JtdParser : Parser {
             throw UnsupportedFormatException("not a JTD document (no CFB magic)")
         }
 
-        // 4. 形式に応じて平文をサルベージする。
-        val plainText = extractPlainText(data, format)
+        // 4. 形式に応じて DocumentText をサルベージする（[DocumentTextPayload] を保持）。
+        val payload = extractPayloadBytes(data, format)
 
         // P-H+F: /Header のヘッダ本文（本文テキストを出す直前に取得）。
         // ヘッダなし・全空・読取失敗 → null（本文のみの従来出力を維持するゲート）。
@@ -69,21 +76,115 @@ class JtdParser : Parser {
         val boxSuffix = readBoxTextSuffix(data)
 
         // 5. SAX 出力（XHTML）。
-        // TODO(Step4): 段落分割・table・ruby の構造化。ここでは平文を一字一句そのまま body に載せる簡易版。
-        // Step6（移行レポート 第6節②③）: マルチシート連結・脚注ペアリングは
-        // [buildCombinedText] が model（rjtd-model lib.rs 214〜239 / 334〜374 行）と
-        // 同一規則で組み上げる。
-        val combinedText = buildCombinedText(data, plainText)
+        // RFC 0013 Phase 2/3: シート 2 以上は div.sheet＋h2 によるシート単位構造化、
+        // シート 1 つ以下で流路構造化がブロック列を産出できた場合は
+        // [FlowSaxEmitter] で <p> / <table> 構造を emit し、不能時は平文フォールバック。
+        val sheets = try {
+            ObjectSheetsReader.readDocumentSheets(data)
+        } catch (e: Exception) {
+            // シート情報復元失敗は通常経路（フォールバック出力）に落ちる。
+            emptyList()
+        }
+        val structured: List<FlowBlock>? = try {
+            val blocks = RuleFlowAssembler.assemble(RuleFlowParser.parse(payload.bytes))
+            if (blocks.isEmpty()) null else blocks
+        } catch (e: Exception) {
+            // 構造化失敗はフォールバック平文経路に落ちる（出力は従来どおり保つ）。
+            null
+        }
 
         val xhtml = XHTMLContentHandler(contentHandler, metadata)
+        // XHTMLContentHandler が head 終端で <body> を自動開始・endDocument で自動閉鎖するため
+        // body は手で開閉しない（二重 body 多重の防止。v0.3.0 で既存挙動を修正）。
         xhtml.startDocument()
-        xhtml.startElement("body")
-        if (combinedText.isNotEmpty()) {
-            // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文 → 枠注記（枠テキスト非空のとき）、
-            // 1つのテキストノードとして連結。
-            xhtml.characters(
-                headerText?.let { "$it\n\n" }.orEmpty() + combinedText + boxSuffix,
-            )
+        // 出力契約（Tika 準拠）: ヘッダ行 → 空行 → 本文 → 枠注記（枠テキスト非空のとき）。
+        // ヘッダは分岐前から 1 組だけ流す（構造化/フォールバック共通）。
+        headerText?.let { xhtml.characters("$it\n\n") }
+        when {
+            // RFC 0013 Phase 3: マルチシート（2 以上）はシート単位構造化。
+            // 全シートの emit 計画を先立てし、途中失敗ならシート emit を一切出さず旧フォールバックへ。
+            sheets.size >= 2 -> {
+                val plan: List<SheetPlan>? = try {
+                    sheets.map { sheet ->
+                        val bytes: ByteArray? =
+                            if (sheet.storagePath.isEmpty() || sheet.storagePath == "/") {
+                                payload.bytes // ルートシート: /DocumentText 本体の既定バイト列
+                            } else {
+                                JtdContainerReader.withFileSystem(data) { fs ->
+                                    JtdContainerReader.readStream(fs, sheet.documentTextPath())
+                                }
+                            }
+                        val blocks: List<FlowBlock>? = if (bytes != null) {
+                            RuleFlowAssembler.assemble(RuleFlowParser.parse(bytes)).ifEmpty { null }
+                        } else {
+                            null
+                        }
+                        // 構造化不能時の平文代替（構造化経路の <p> 化 emit に流用する）。
+                        val flatText: String = when {
+                            sheet.storagePath.isEmpty() || sheet.storagePath == "/" -> payload.text
+                            bytes == null -> ""
+                            else -> try {
+                                DocumentTextParser.parseDocumentText(bytes).plainText()
+                            } catch (e: Exception) {
+                                ""
+                            }
+                        }
+                        val footnote = FootnoteTextReader.readFootnoteForSheet(data, sheet)
+                        SheetPlan(sheet.name, blocks, flatText.trim(), footnote?.trim())
+                    }.ifEmpty { null }
+                } catch (e: Exception) {
+                    // シート復元失敗は旧フォールバック（buildCombinedText 平文出力）に落ちる。
+                    null
+                }
+
+                if (plan != null) {
+                    for (p in plan) {
+                        // シートは <div class="sheet"> で封じ込め、シート名は <h2>。
+                        // 平文が空・ブロックなし・脚注なしのシートも div と h2 は必ず emit。
+                        xhtml.startElement("div", "class", "sheet")
+                        xhtml.startElement("h2")
+                        xhtml.characters(p.name)
+                        xhtml.endElement("h2")
+                        if (p.blocks != null) {
+                            FlowSaxEmitter.emit(p.blocks, xhtml)
+                        } else if (p.flat.isNotEmpty()) {
+                            xhtml.startElement("p")
+                            xhtml.characters(p.flat)
+                            xhtml.endElement("p")
+                        }
+                        if (p.footnote != null && p.footnote.isNotEmpty()) {
+                            xhtml.startElement("p")
+                            xhtml.characters(p.footnote)
+                            xhtml.endElement("p")
+                        }
+                        xhtml.endElement("div")
+                    }
+                    // 枠（layout-box）はルート直下 emit 相当として単一シート構造化と同じコードを共用。
+                    emitLayoutBox(xhtml, data)
+                } else {
+                    emitCombinedTextFallback(xhtml, data, payload.text, boxSuffix)
+                }
+            }
+
+            // シート 1 つ以下の文書で流路構造化がブロック列を産出できた場合:
+            // フローブロック列 + 脚注（従来契約: 本文末尾に <p> で連結）+ 枠注記。
+            structured != null -> {
+                FlowSaxEmitter.emit(structured, xhtml)
+                val footnote = FootnoteTextReader.readFootnoteForSheet(
+                    data,
+                    ObjectSheetsReader.SheetItem(0, "タイトル", "", null),
+                )
+                if (footnote != null) {
+                    xhtml.characters("\n\n")
+                    xhtml.startElement("p")
+                    xhtml.characters(footnote.trim())
+                    xhtml.endElement("p")
+                }
+                emitLayoutBox(xhtml, data)
+            }
+
+            // フォールバック: 従来契約（ヘッダ後の平文 1 ノード + 枠注記）。
+            else -> emitCombinedTextFallback(xhtml, data, payload.text, boxSuffix)
         }
 
         // 6. オブジェクト枠（ObjectBox）の埋め込みドキュメント抽出と委譲
@@ -96,8 +197,47 @@ class JtdParser : Parser {
             context = parseContext,
         )
 
-        xhtml.endElement("body")
         xhtml.endDocument()
+    }
+
+    /**
+     * /LayoutBoxText（囲み枠）の XHTML 構造 emit（RFC 0013 §10.3・Phase 3 共用）。
+     * <div class="layout-box"> 内でブロック毎 <p> に出し、
+     * ※注記は -t 互換のためテキストノードとして残す。
+     * 欠落・抽出空・読取失敗は emit なし（本文のみの従来出力を維持する）。
+     */
+    private fun emitLayoutBox(xhtml: XHTMLContentHandler, data: ByteArray) {
+        val layoutBlocks: List<String>? = try {
+            LayoutBoxTextReader.readLayoutBoxText(data)?.blocks?.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
+        if (layoutBlocks == null || layoutBlocks.isEmpty()) return
+        xhtml.characters("\n※枠内テキスト\n")
+        xhtml.startElement("div", "class", "layout-box")
+        for (block in layoutBlocks) {
+            xhtml.startElement("p")
+            xhtml.characters(block)
+            xhtml.endElement("p")
+        }
+        xhtml.endElement("div")
+    }
+
+    /**
+     * フォールバック平文出力（従来契約: ヘッダ後の平文 1 ノード + 枠注記）。
+     * マルチシート連結・脚注ペアリングは [buildCombinedText] が model
+     * （rjtd-model lib.rs 214〜239 / 334〜374 行）と同一規則で組み上げる。
+     */
+    private fun emitCombinedTextFallback(
+        xhtml: XHTMLContentHandler,
+        data: ByteArray,
+        plainText: String,
+        boxSuffix: String,
+    ) {
+        val combinedText = buildCombinedText(data, plainText)
+        if (combinedText.isNotEmpty()) {
+            xhtml.characters(combinedText + boxSuffix)
+        }
     }
 
     /**
@@ -224,35 +364,38 @@ class JtdParser : Parser {
      * DocumentText の読み出しは [DocumentTextParser.readDocumentTextPayload] の
      * 3 経路フォールバック（/DocumentText → /JSCompDocument 展開 → 埋め込みスキャン）に
      * 全経路で委譲し、形式ごとの重複読み出しロジックを排除する。
+     * [DocumentTextPayload]（生バイト列 + 平文）をそのまま返す（構造化は
+     * [JtdParser.parse] が payload.bytes で行う）。
      */
-    private fun extractPlainText(data: ByteArray, format: JtdFormat): String = when (format) {
-        // /DocumentText が直接読める通常コンテナ・埋め込み SsmgV.01 コンテナ。
-        // 内部的には両経路とも readDocumentTextPayload のフォールバックで処理する。
-        JtdFormat.COMPOUND_DOCUMENT_TEXT,
-        JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT ->
-            DocumentTextParser.readDocumentTextPayload(data).text
+    private fun extractPayloadBytes(data: ByteArray, format: JtdFormat): DocumentTextPayload =
+        when (format) {
+            // /DocumentText が直接読める通常コンテナ・埋め込み SsmgV.01 コンテナ。
+            // 内部的には両経路とも readDocumentTextPayload のフォールバックで処理する。
+            JtdFormat.COMPOUND_DOCUMENT_TEXT,
+            JtdFormat.COMPOUND_EMBEDDED_DOCUMENT_TEXT ->
+                DocumentTextParser.readDocumentTextPayload(data)
 
-        // /JSCompDocument が JustCompressedDocument。展開した内部 CFB を再度開封して読む。
-        JtdFormat.COMPOUND_JUST_COMPRESSED_DOCUMENT -> {
-            try {
-                DocumentTextParser.readDocumentTextPayload(data).text
-            } catch (e: NotFoundException) {
-                // /DocumentText 欠落系は従来どおり NotFoundException のまま伝播。
-                throw e
-            } catch (e: JtdException) {
-                // -lh5- 以外の LHA メソッド・破損等 → 未対応形式として変換（Step3 の挙動維持）。
-                throw UnsupportedFormatException("JustCompressedDocument decompress failed: ${e.message}")
+            // /JSCompDocument が JustCompressedDocument。展開した内部 CFB を再度開封して読む。
+            JtdFormat.COMPOUND_JUST_COMPRESSED_DOCUMENT -> {
+                try {
+                    DocumentTextParser.readDocumentTextPayload(data)
+                } catch (e: NotFoundException) {
+                    // /DocumentText 欠落系は従来どおり NotFoundException のまま伝播。
+                    throw e
+                } catch (e: JtdException) {
+                    // -lh5- 以外の LHA メソッド・破損等 → 未対応形式として変換（Step3 の挙動維持）。
+                    throw UnsupportedFormatException("JustCompressedDocument decompress failed: ${e.message}")
+                }
             }
+
+            // CFB ではあるが既知レイアウトに一致しない。
+            JtdFormat.COMPOUND_UNKNOWN ->
+                throw UnsupportedFormatException("unrecognized JTD compound layout")
+
+            // 防御的: この分岐に到達しない（parse が先に弾く）。
+            JtdFormat.UNKNOWN ->
+                throw UnsupportedFormatException("not a JTD document (no CFB magic)")
         }
-
-        // CFB ではあるが既知レイアウトに一致しない。
-        JtdFormat.COMPOUND_UNKNOWN ->
-            throw UnsupportedFormatException("unrecognized JTD compound layout")
-
-        // 防御的: この分岐に到達しない（parse が先に弾く）。
-        JtdFormat.UNKNOWN ->
-            throw UnsupportedFormatException("not a JTD document (no CFB magic)")
-    }
 
     /**
      * [TikaInputStream] から全バイトを読み出す。読み込み中に [limit] を超えたら
@@ -273,6 +416,21 @@ class JtdParser : Parser {
         }
         return out.toByteArray()
     }
+
+    /**
+     * マルチシート構造化の 1 シート分 emit 計画（RFC 0013 Phase 3）。
+     *
+     * @property name シート名（`<h2>` で emit。root は既定「タイトル」）。
+     * @property blocks 流路構造化ブロック列（null のとき [flat] で代替）。
+     * @property flat 構造化不能時の平文（trim 済。`<p>` で emit する）。
+     * @property footnote シート脚注（`<p>` で emit。null・空は emit なし）。
+     */
+    private data class SheetPlan(
+        val name: String,
+        val blocks: List<FlowBlock>?,
+        val flat: String,
+        val footnote: String?,
+    )
 
     private companion object {
         const val MIME_JTD = "application/vnd.justsystems.ichitaro"
