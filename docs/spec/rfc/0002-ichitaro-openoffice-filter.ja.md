@@ -214,6 +214,17 @@ rjtd はこの artifact を no-code compatibility reference として扱わな�
 - extension metadata、filter registration、file inventory、independently observable sample behavior を clean-room inputs として使う。
 - より深い binary analysis の前には legal advice を求める。
 
+### 決定記録（2026-10-01）
+
+プロジェクトオーナーの判断により、`jsreadermi.dll` に対して範囲を限定した観察型バイナリ解析（スクラッチパッド上での逆アセンブルによる証跡確認）を 2026-10-01 に実施した。範囲と根拠:
+
+- 対象は Sun が無償配布した extension package の本ファイルのみ。一太郎本体および Word の一太郎コンバータはバイナリ解析の対象としない。
+- 目的は相互運用性（フォーマットリーダー）のための研究である。情報抽出を目的としたバイナリの観察型解析は著作権法第30条の4（「著作物に表現された思想又は感情の享受を目的としない利用」。情報解析はその適用類型の一つ）の範囲にあたるものであり、license の制限はその範囲で調整される。外国法域での取扱い（米国 fair use 等）も併せて考慮する。
+- 成果は挙動・事実の観察としてのみ登録する — code→value 対応表、定数テーブル、stream/role マップ、構造仮説など。RFC 0013 §20 の [L1]/[L2] 証拠レベルのように区別する。decompiled pseudo-code や implementation logic をプロジェクトに持ち込まない。
+- 常設の境界は維持する: implementation logic の copy 禁止。Sun 内部構造から導いた JTD フォーマットに関する推論は、コーパス検証まで [L2] のまま据え置く。
+
+本記録は法的助言ではない。根拠は保存し、バイナリ解析の範囲を広げる前に legal advice を求める。
+
 ## Impact on rjtd
 
 RFC 0001 は `/DocumentText` を local samples で最大の common stream として特定した。

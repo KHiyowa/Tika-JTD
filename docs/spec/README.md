@@ -31,7 +31,7 @@ Tika JTD+ では、**「エディタ・描画エンジンの夢を放棄し、�
 | **0010** | [Document Sheets](rfc/0010-document-sheets.md)<br>[Document Sheets (マルチシート構造)](rfc/0010-document-sheets.ja.md) | KHiyowa | マルチシート | `/DocItemInfo` (UTF-16LE) および `/ObjectSheets/DocSheet/DOCS_XXXX/` 構造の解析 (`ObjectSheetsReader`) |
 | **0011** | [ObjectBox and Embedded Document Extraction](rfc/0011-object-box-embedded-documents.md)<br>[オブジェクト枠 (ObjectBox) と埋め込みドキュメント抽出仕様](rfc/0011-object-box-embedded-documents.ja.md) | KHiyowa | 埋め込み / 再帰抽出 | `Embedding N` / `OleItem N` ストレージ走査、生 BIFF8 の CFB ラップ (`Workbook`)、WMF スライス (`\x03EmbeddedPress`)、Tika 再帰抽出 (`ObjectBoxExtractor`) |
 | **0012** | [JSEQ Equation Object and MATH.VAF Container Specification](rfc/0012-jseq-equation-object.md)<br>[JSEQ 数式オブジェクト枠と MATH.VAF コンテナ仕様](rfc/0012-jseq-equation-object.ja.md) | KHiyowa | 数式 / オブジェクト枠 | (Draft) `JSEQ3Contents` (`MATH.VAF`) コンテナ階層、ヘッダレイアウト、1,162B 固定長不変量、全文字パレット自動導出プロトコル |
-| **0013** | [Rule Flow Reconstruction Model and Table SAX Projection Specification](rfc/0013-structured-sax-flow-contract.md)<br>[罫線流路復元モデルと表構造 SAX 射影仕様（HTML Table / Markdown Contract）](rfc/0013-structured-sax-flow-contract.ja.md) | KHiyowa | 構造化出力 / 罫線表 | (Draft) 罫線流路復元 Doctrine、確定的行境界（`0x000e`）、スパン Coalesce 規則、列数算術、スタイル符号（行内/行間・BOX文法）、安定グリッド判定による表状態機械、XHTML / GFM Markdown 二重契約 |
+| **0013** | [Rule Flow Reconstruction Model and Table SAX Projection Specification](rfc/0013-structured-sax-flow-contract.md)<br>[罫線流路復元モデルと表構造 SAX 射影仕様（HTML Table / Markdown Contract）](rfc/0013-structured-sax-flow-contract.ja.md) | KHiyowa | 構造化出力 / 罫線表 | (Accepted / v0.3.0 Phase 0–2 実装済み) 罫線流路復元 Doctrine、確定的行境界（`0x000e`）、スパン Coalesce 規則、列数算術、スタイル符号、安定グリッド判定による表状態機械、列スロット和集合・colspan 算出、マルチシート・レイアウト枠封じ込め、XHTML / GFM Markdown 二重契約 |
 
 ---
 

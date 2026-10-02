@@ -80,3 +80,11 @@ WASM bindings (`HwpDocument`) expose:
   ]
   ```
 - `doc.getSheetPlainText(index: number): string | undefined`
+
+## Apache Tika SAX Projection Contract (v0.3.0 Established)
+
+In integration with Apache Tika 4's `ContentHandler` pipeline, multi-sheet documents are structured with the following SAX event encapsulation:
+- Each sheet is delimited by a `<div class="sheet">` container element, prefixed with an `<h2>{Sheet Name}</h2>` header.
+- The sheet's body text, reconstructed table markup, and sheet-specific footnotes (`<p>{Footnote}</p>`) are enclosed within this container.
+- Ordering contracts across sheets and within sheets remain invariant (co-specified with RFC 0013).
+- If sheet metadata reading fails, the parser safely falls back to flat single-node plain-text extraction.

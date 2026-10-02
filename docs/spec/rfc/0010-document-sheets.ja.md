@@ -80,3 +80,11 @@ WASM バインディング (`HwpDocument`) では以下の API を提供する�
   ]
   ```
 - `doc.getSheetPlainText(index: number): string | undefined`
+
+## Apache Tika SAX 射影契約（v0.3.0 確定）
+
+Apache Tika 4 の `ContentHandler` パイプラインにおいて、マルチシート文書は以下の SAX イベント構造でカプセル化される：
+- 各シートを `<div class="sheet">` 要素で区切り、先頭に `<h2>{シート名}</h2>` を出力する。
+- シート内の本文、表構造、およびシート毎脚注（`<p>{脚注}</p>`）をその内部に包含する。
+- シート間およびシート内の連結順序契約は不変である（RFC 0013 連係）。
+- シート情報の読取に失敗した場合、従来の平文 1 ノード出力へ安全にフォールバックする。
