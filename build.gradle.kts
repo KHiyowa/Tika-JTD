@@ -42,6 +42,30 @@ subprojects {
             systemProperty("gatagate.corpus", "true")
             systemProperty("gatagate.root", rootProject.projectDir.absolutePath)
         }
+
+        // §12.5 回帰評価セット（opt-in・ground truth 骨格照合・git 未追跡）。
+        // gradle test -Pflowstruct.rail で tr/td/colspan/rowspan 骨格トライブ照合を回す（本文非開示）。
+        if (providers.gradleProperty("flowstruct.rail").isPresent) {
+            systemProperty("flowstruct.rail", "true")
+            systemProperty("flowstruct.root", rootProject.projectDir.absolutePath)
+        }
+
+        // RFC 0013 追補 §13 縦継続セル ground truth レール（opt-in・骨格のみ・本文非開示）。
+        // gradle test -Ptallrow.rail で縦統合（tall cell）骨格トライブ照合を回す。
+        if (providers.gradleProperty("tallrow.rail").isPresent) {
+            systemProperty("tallrow.rail", "true")
+            systemProperty("tallrow.root", rootProject.projectDir.absolutePath)
+        }
+
+        // RFC 0013 追補 §20 罫ボックス save 往復 rail（opt-in・意味イベントのみ・本文非開示）。
+        // gradle test -Prulebox.rail で保存往復不变性＋辺幅 ground truth 照合を回す。
+        if (providers.gradleProperty("rulebox.rail").isPresent) {
+            systemProperty("rulebox.rail", "true")
+            systemProperty("rulebox.root", rootProject.projectDir.absolutePath)
+            providers.gradleProperty("rulebox.dir").orNull?.let {
+                systemProperty("rulebox.dir", rootProject.file(it).absolutePath)
+            }
+        }
     }
 
     extensions.configure<JavaPluginExtension> {
