@@ -75,3 +75,17 @@ val captureGolden by tasks.registering(JavaExec::class) {
         "--root", rootProject.projectDir,
     )
 }
+
+// ローカルコーパス（git 未追跡・opt-in）から XHTML を並列採取する開発タスク。
+// GoldenCapture と同じ parallelStream パターン（1 JVM・JVM 起動コストゼロ・CLI --xml と同一 SAX 契約）
+val captureXhtml by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Capture XHTML output for the local corpus in parallel (testdata/corpus, git-ignored)"
+    mainClass.set("com.hiyowa.tika.jtd.capture.XhtmlCapture")
+    classpath = sourceSets["test"].runtimeClasspath
+    args(
+        "--corpus", rootProject.projectDir.resolve("testdata/corpus"),
+        "--out", rootProject.projectDir.resolve("build/capture-xhtml"),
+        "--root", rootProject.projectDir,
+    )
+}
