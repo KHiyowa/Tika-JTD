@@ -5,7 +5,41 @@
 フォーマットは [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に基づいており、
 このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠しています。
 
-## [Unreleased]
+## [0.3.0] - 2026-10-03
+
+### 追加
+- **一太郎罫線表の構造化出力（RFC 0013 流路モデル）**:
+  - 一太郎文書（`.jtd` / `.jtt` / `.jttc`）内の罫線表を解析し、XHTML（`<table>` / `<tr>` / `<td>`）および Tika 4 既定 Markdown（GFM パイプ表）として構造化出力する機能を追加。
+  - セル結合（`colspan` / `rowspan`）の近似判定に対応（XHTML で属性を保持。Markdown では GFM の制約により平坦化）。
+  - セル内改行（折返し）の半角スペース平坦化により、Markdown 表構造の分断を防止。
+  - 時間割様式、申請書様式、カレンダー（月暦）様式など、多様な帳票グリッドの再構成に対応（縦書き帯のセル集約、ヘッダ行の取り込み、字下げ折返しの論理行統合）。
+  - 複数シート構造を `<div class="sheet">` ＋シート名 `<h2>`、レイアウト枠（枠内テキスト）を `<div class="layout-box">` ＋段落 `<p>` で階層構造化。
+- **リバースエンジニアリング仕様書（RFC）の策定**:
+  - 数式オブジェクト（JSEQ）のバイナリ構造仕様書（RFC 0012）。
+  - 罫線流路構造化および SAX 射影契約仕様書（RFC 0013）。
+- **開発・検証用ハーネスの追加**:
+  - 一太郎印刷 PDF から罫線ベクトルとテキストを抽出してセルグリッド正解を生成・突合する PDF グリッドオラクルツール（`tools/pdf_grid_oracle/`）。
+  - 全コーパスの XHTML 出力を一括高速採取しブラウザ確認用 CSS を注入する並列採取ハーネス（`XhtmlCapture`）。
+  - 表構造骨格フィンガープリントおよび保存往復不変性を検証するオプトインテストレール（`CorpusGroundTruthRailTest` / `CorpusRuledBoxGroundTruthRailTest` 等）。
+
+### 修正
+- **文書冒頭・表外テキストの欠落修正（RFC 0013 追補 §13.1）**:
+  - 特定のセグメント構造を持つ文書において、ヘッダ直後から表までの先頭テキスト（表題行など）が読み飛ばされていた不具合を修正。
+- **インライン規則領域（FE0X）による文字化け・テキスト分断の修正**:
+  - `/DocumentText` 中に挟まるインライン規則記録領域（`0xFE00`〜`0xFE0F`）により、本文テキストが分断されて巨大なバイナリノイズとして出力されていた不具合を修正。
+- **`<body>` タグの重複出力の修正**:
+  - `XHTMLContentHandler` が自動管理する `<body>` タグとパーサー側の手動出力が競合し、重複した `<body>` が出力されていた問題を解消。
+- **破損コンテナサルベージ時の不要グリフ混入防止**:
+  - サルベージテキスト抽出時に混入していた不要な制御文字・Latin-1 グリフを排除し、本文テキストの抽出精度を改善。
+
+### 破壊的変更
+- **XHTML 出力の構造化**:
+  - `-x` / `PUT /tika/xml` の出力が、従来の「本文全体を1個のテキストノードとする形式」から、`<p>` / `<table>` / `<tr>` / `<td>` / `<div>` 等の構造化 XHTML イベントへ変更されました。
+  - 整形改行の挿入に伴い、プレーンテキスト抽出（`-t` / `PUT /tika/text`）における空白・改行の位置が v0.2.x から変更されています（文字全量保存則はコーパス全件で検証済み）。
+- **MIME タイプの変更 (`application/vnd.justsystem.ichitaro` → `application/vnd.justsystems.ichitaro`)**:
+  - 開発元（ジャストシステム）の公式表記に合わせて、カスタム MIME タイプ名を `application/vnd.justsystems.ichitaro`（末尾 `s`）に変更しました。
+- **Tika 4 既定 Markdown 出力での GFM パイプ表出力**:
+  - 罫線表を含む文書を `PUT /tika` 等で処理した際、従来の平文テキストではなく GFM パイプ表（`| 列1 | 列2 |`）が出力されるようになります。
 
 ## [0.2.2] - 2026-09-28
 
@@ -67,7 +101,8 @@
 - 公式 Tika Server コンテナ（`/tika-extras`）への JAR ドロップインによる自動認識機構（MIME 型定義 `custom-mimetypes.xml` および ServiceLoader 設定の内包）。
 - 初期 CLI ツール（`cat`, `export`, `sheets` サブコマンド）。
 
-[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/KHiyowa/tika-jtd/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/KHiyowa/tika-jtd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/KHiyowa/tika-jtd/compare/v0.1.0...v0.2.0

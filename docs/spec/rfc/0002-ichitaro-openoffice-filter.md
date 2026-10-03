@@ -179,7 +179,7 @@ style:font-decl
 
 Independent clean-room evidence from JXW.Application COM automation confirms the Ichitaro text export path without depending on the DLL binary.
 
-JustSystem exposes a registered COM ProgID:
+JustSystems exposes a registered COM ProgID:
 
 ```text
 JXW.Application
@@ -215,6 +215,17 @@ rjtd must treat this artifact as a no-code compatibility reference:
 - Do not decompile the DLL as part of normal rjtd development.
 - Use extension metadata, filter registration, file inventory, and independently observable sample behavior as clean-room inputs.
 - Consult legal advice before any deeper binary analysis.
+
+### Decision record (2026-10-01)
+
+At owner discretion, a bounded observational binary analysis (scratchpad disassembly for evidence-anchored inspection) of `jsreadermi.dll` was carried out on 2026-10-01. Scope and rationale:
+
+- The artifact is a freely distributed Sun extension package; the analysis targets this file only. Ichitaro itself and Word's Ichitaro converter remain off-limits for binary analysis.
+- The purpose is interoperability research (format readers). Observational analysis of the binary for information extraction falls under Japanese Copyright Act Article 30-4 ("exploitation not aimed at enjoying the ideas or sentiments expressed in a copyrighted work"; information analysis being one application type thereof), which limits the license restriction accordingly; foreign treatment (e.g., U.S. fair use) is to be considered in parallel.
+- Outputs are registered as behavioral/factual observations only — code-to-value correspondences, constant tables, stream/role maps, and structural hypotheses — as RFC 0013 §20 does with its [L1]/[L2] evidence levels. No decompiled pseudo-code or implementation logic is carried into the project.
+- The standing boundary remains: no copying of implementation logic; anything inferred about the JTD format from Sun internals stays [L2] pending corpus verification.
+
+This record is not legal advice; rationale should be preserved, and legal advice consulted before broadening binary analysis beyond this scope.
 
 ## Impact on rjtd
 

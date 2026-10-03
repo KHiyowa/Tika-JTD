@@ -12,8 +12,9 @@
 
 * **Apache Tika 4 統合:** 既存の Tika パイプライン（OpenWebUI、Elasticsearch、Solr、OpenSearch、独自クローラー等）に JAR を追加するだけで透過的に接続。
 * **純粋 JVM 実装:** Apache POI（`POIFSFileSystem`）による OLE2/CFB 解体と Kotlin による独自ストリーム復元。外部プロセスや Rust 等のネイティブバイナリに依存しません。
+* **罫線表の構造化出力 (v0.3.0〜):** 一太郎の罫線表を部分的に解析し、XHTML (`<table>`) や Markdown (GFMパイプ表) として構造化。LLM / RAG パイプラインで文脈や表の意味を理解可能な形で出力（※完全な帳票再現ではなく、RAG用途を主眼とした近似構造化です）。
 * **オブジェクト枠の再帰抽出:** 表計算（Excel / BIFF8）や図形（WMF）等の埋め込みオブジェクトを、Tika の `EmbeddedDocumentExtractor` 契約を通じて再帰的に解析。
-* **実文書 510 ファイルによる検証:** 官公庁・自治体・学校などの実流通コーパスで平均一致度 93.7% の耐性を実証。
+* **実文書 510 ファイルによる検証:** 官公庁・自治体・学校などの実流通コーパスで平均一致度 94.8% の耐性を実証。
 * **公式 Docker Server にポン置き対応:** 公式の `apache/tika` コンテナにイメージ再ビルド不要で、JAR 1 本をマウントするだけで即座に稼働。
 
 > 知は、誰かの手元に眠っているだけでは、まだ公共の知とはいえない。  
@@ -32,7 +33,7 @@
 ```bash
 docker run -d --name tika \
   -p 9998:9998 \
-  -v "$PWD/jars/tika-parser-jtd-0.2.2-server.jar:/tika-extras/tika-parser-jtd.jar:ro" \
+  -v "$PWD/jars/tika-parser-jtd-0.3.0-server.jar:/tika-extras/tika-parser-jtd.jar:ro" \
   apache/tika:latest-full
 ```
 
@@ -71,7 +72,7 @@ java -cp "/opt/tika-server/*:/opt/tika-server/lib/*:/tika-extras/*" \
 ```
 
 1. **`META-INF/services/org.apache.tika.parser.Parser`**: ServiceLoader が `com.hiyowa.tika.jtd.JtdParser` を自動登録し、`AutoDetectParser`（およびサーバーのパーサーチェーン）が `.jtd` を受け取るようになります。
-2. **JAR ルートの `custom-mimetypes.xml`**: `application/vnd.justsystem.ichitaro`（glob: `*.jtd` / `*.jtt` / `*.jttc`）の MIME 定義が自動マージされます。外部の設定ファイル編集は不要です。
+2. **JAR ルートの `custom-mimetypes.xml`**: `application/vnd.justsystems.ichitaro`（glob: `*.jtd` / `*.jtt` / `*.jttc`）の MIME 定義が自動マージされます。外部の設定ファイル編集は不要です。
 3. **純粋 JVM 実装**: OLE2 容器の解析は JVM 版 Apache POI が行うため、コンテナ内に Rust バイナリやネイティブ共有ライブラリを配置する必要がありません。
 
 > [!NOTE]
@@ -97,7 +98,7 @@ java -Dtika.extras.dir=./jars \
 // build.gradle.kts
 dependencies {
     implementation("org.apache.tika:tika-core:4.0.0")
-    implementation("com.hiyowa:tika-parser-jtd:0.2.2")
+    implementation("com.hiyowa:tika-parser-jtd:0.3.0")
 }
 ```
 
@@ -131,33 +132,33 @@ fun main() {
 
 ### 1.3 CLI による単体抽出 (Standalone CLI)
 
-GitHub Releases から `tika-parser-jtd-cli-0.2.2-standalone.jar`（すべての依存関係と全 Tika パーサーを内包した単体実行可能 Fat JAR）をダウンロードすれば、Apache Tika 公式 CLI（`tika-app`）と同一のインターフェースで単体実行できます。
+GitHub Releases から `tika-parser-jtd-cli-0.3.0-standalone.jar`（すべての依存関係と全 Tika パーサーを内包した単体実行可能 Fat JAR）をダウンロードすれば、Apache Tika 公式 CLI（`tika-app`）と同一のインターフェースで単体実行できます。
 
 一太郎文書（`.jtd` / `.jtt` / `.jttc`）はもちろん、Tika がサポートする全形式を本 JAR 1 本で処理可能です。
 
 ```bash
 # プレーンテキスト抽出（標準出力）
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --text path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar --text path/to/document.jtd
 # または短縮形: -t
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -t path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar -t path/to/document.jtd
 
 # メタデータ一覧の出力
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --metadata path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar --metadata path/to/document.jtd
 # または短縮形: -m
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -m path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar -m path/to/document.jtd
 
 # 構造化 JSON 出力（埋め込みメタデータ・テキスト）
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --jsonRecursive path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar --jsonRecursive path/to/document.jtd
 # または短縮形: -J
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -J path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar -J path/to/document.jtd
 
 # XHTML 出力
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --xml path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar --xml path/to/document.jtd
 # または短縮形: -x
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar -x path/to/document.jtd
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar -x path/to/document.jtd
 
 # ヘルプと全オプションの表示
-java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --help
+java -jar tika-parser-jtd-cli-0.3.0-standalone.jar --help
 ```
 
 ---
@@ -168,8 +169,16 @@ java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --help
 * **Apache Tika:** 4.0.0 以上
 
 > [!IMPORTANT]
-> **ライブラリ出力形式について（v0.2.2 現在）:**  
-> 現行バージョン（v0.2.2）の `JtdParser` コアライブラリでは、検索インデックスや RAG パイプラインでの利用を主眼としており、**Tika のプレーンテキスト抽出およびメタデータ抽出に対応**しています（次期バージョンにて構造化 XHTML 出力への対応を推進中）。CLI ツール側では Tika のフレームワーク経由で `--xml` や `--jsonRecursive` の出力が可能です。
+> **ライブラリ出力形式と罫線構造化について (v0.3.0〜):**  
+> `JtdParser` はプレーンテキスト抽出・メタデータ抽出に加え、**RFC 0013 に基づく罫線表の構造化出力に対応しました**。`-x` / `PUT /tika/xml` では `<p>` / `<table>` / `<tr>` / `<td>` / `<br/>` / `<div class="sheet">` / `<div class="layout-box">` の構造イベントが出力され、Tika 4 の既定 Markdown 出力（`PUT /tika`）では罫線表が GFM パイプ表として自動生成されます。
+> 
+> **【重要】罫線構造化の目的と再現範囲（LLM / RAG 用途への割り切り）:**  
+> 本パーサーにおける罫線の構造化は**部分的な対応**にとどまっており、**「LLM（大規模言語モデル）に読み込ませて RAG（検索拡張生成）のコンテキストとして利用できる程度」** をターゲットとしています。一太郎の組版や方眼紙状の複雑な罫線トポロジー（斜線、多重結合、自由配置枠、装飾罫線など）を**完全に再現しているわけではありません**。
+> 表の親子関係や行・列の大枠のつながりを保持し、検索インデックスや LLM が文脈・意味を解釈できるようにすることに主眼を置いているため、帳票の完全な描画再現や WYSIWYG 互換を保証するものではない点にご留意ください。
+> 
+> **セル内改行の平坦化（Phase 3・§12.4 T3-1）:** SAX は 1 本のパイプであり、Tika の Markdown シリアライザ（commonmark）はセル内 `<br/>` をハードブレーク（末尾 2 空白＋改行）として出力します。GFM の表行は単一行でなければならないため、セル内に折返し（`0x000a`）があっても `<br/>` は出力せず**半角スペース 1 個へ平坦化**します（前後にテキストがない折返し＝スパン間前進マーカーは破棄、連続折返しは 1 個に集約）。段落レベルの `<br/>` は従来どおり出力します（ブロックレベルでは Markdown の構造を破壊しません）。
+> 
+> **二重契約の注意点:** 結合セルの近似情報（`colspan` / `rowspan`）は XHTML 側のみ保持され、Markdown 側は GFM の制約により平坦化されます（実測: Tika 4 の Markdown シリアライザは列数の足りない行を自動補間しないため、結合セルの Markdown 側は末尾列を空欄とする GFM 妥当形式で素通しされます。補間が必要な単純な欠落槽はパーサー側で槽ごとの空セルを出します）。また、構造導入により XHTML シリアライザが整形改行を挿入するため、`-t` / `PUT /tika/text` の平坦化テキストは v0.2.x までとバイト一致しなくなります（契約は「空白の差分を許容するテキスト全量保存」へ移行。コーパス 596 ファイルで実質テキスト欠落ゼロを確認済み）。`-t` 高速パスは平文契約です。
 
 > [!NOTE]
 > **Tika 3系へのバックポートについて:**  
@@ -186,10 +195,10 @@ java -jar tika-parser-jtd-cli-0.2.2-standalone.jar --help
 | **裁判所** | 16 files | 93.8% | 0.990 |
 | **教育委員会・学校** | 114 files | 78.1% | 0.962 |
 | **中央省庁・国** | 236 files | 76.7% | 0.971 |
-| **地方自治体** | 69 files | 62.3% | 0.916 |
+| **地方自治体** | 69 files | 63.8% | 0.917 |
 | **都道府県警察** | 73 files | 23.3% | 0.874 |
 | **オーナー実文書** | 2 files | 50.0% | 0.931 |
-| **合計** | **510 files** | **67.8%** | **0.948** |
+| **合計** | **510 files** | **68.0%** | **0.948** |
 
 #### 検証ハーネスの算出アルゴリズムと評価指標の読み方
 
@@ -242,7 +251,7 @@ OpenJTD の公開ドキュメント（0.0.1）でも「段落の完全な意味�
 
 **Tika JTD+ は、完全な描画・編集エンジンの独自構築を目指すのではなく、「一太郎固有のバイナリ解析とテキスト・構造の救出」に特化する方針を採りました。**
 
-* **画面再現を捨て、テキストと構造の抽出に特化:** 見た目のレイアウトをピクセル単位で完全再現する必要はありません。本文の流れ、表（テーブル）、箇条書き、見出し構造さえ正確に引っこ抜くことができれば、レイアウトの復元や要約、構造化は現代の大規模言語モデル（LLM）やMarkdownが肩代わりしてくれます。
+* **画面再現を捨て、テキストと構造の抽出に特化:** 見た目のレイアウトをピクセル単位で完全再現する必要はありません。本文の流れ、表（テーブル）、箇条書き、見出し構造さえ正確に引っこ抜くことができれば、レイアウトの復元や要約、構造化は現代の大規模言語モデル（LLM）やMarkdownが肩代わりしてくれます。一太郎の極めて複雑な罫線トポロジーも、ピクセル完全な帳票再現ではなく「LLMに食わせてRAGとして文脈や表の意味を理解できる実用水準」をゴールとして部分的に構造化しています。
 * **Apache Tika エコシステムとの協調（オブジェクト枠の再帰抽出）:** OLE2/CFB コンテナの解体は枯れ切った Apache POI に任せ、オブジェクト枠から取り出した埋め込みバイナリは Apache Tika の `EmbeddedDocumentExtractor` に委ねます。Excel なら POI、PDF なら PDFBox といった Tika が誇る膨大な既存パーサーチェーンに接続することで、自前で外部形式パーサーを抱え込むことなく、安全かつ網羅的な再帰解析を実現します。
 * **JVM / Kotlin への再構築:** 外部プロセスやネイティブライブラリを排除し、純粋な JVM 実装として完結させました。これにより、公式 Tika Server への「JAR 1 本ドロップイン」が可能になり、本番環境への導入障壁を劇的に引き下げました。
 

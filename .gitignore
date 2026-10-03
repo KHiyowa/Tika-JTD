@@ -22,6 +22,9 @@ local.properties
 # Internal documents
 /docs/internal/
 
+# Python venv for PDF oracle spike
+tools/.venv-pdf/
+
 # macOS
 .DS_Store
 
@@ -29,3 +32,6 @@ local.properties
 *.class
 hs_err_pid*
 replay_pid*
+
+# Python
+__pycache__/

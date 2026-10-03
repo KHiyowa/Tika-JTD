@@ -77,7 +77,7 @@ class CliContractTest {
         val file = jtdFile("meta", mapOf("/DocumentText" to markerDocumentText("ジョバンニ")))
         val (code, out, _) = run("--metadata", file.absolutePath)
         assertEquals(0, code)
-        assertTrue(out.contains("Content-Type: application/vnd.justsystem.ichitaro") || out.contains("application/vnd.justsystem.ichitaro"), "actual: $out")
+        assertTrue(out.contains("Content-Type: application/vnd.justsystems.ichitaro") || out.contains("application/vnd.justsystems.ichitaro"), "actual: $out")
     }
 
     @Test

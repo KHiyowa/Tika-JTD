@@ -8,7 +8,7 @@ English version: [0011-object-box-embedded-documents.md](0011-object-box-embedde
 
 ## 概要
 
-一太郎（Justsystem 一太郎）の文書（JTD / JTT）において、本文（`/DocumentText`）、ヘッダ（`/Header`）、レイアウト枠（`/LayoutBoxText`）とは別に、文書内に配置・埋め込まれた表計算、図形、OLE オブジェクト等の外部コンポーネントは**「オブジェクト枠（ObjectBox）」**として保持される。
+一太郎（JustSystems 一太郎）の文書（JTD / JTT）において、本文（`/DocumentText`）、ヘッダ（`/Header`）、レイアウト枠（`/LayoutBoxText`）とは別に、文書内に配置・埋め込まれた表計算、図形、OLE オブジェクト等の外部コンポーネントは**「オブジェクト枠（ObjectBox）」**として保持される。
 
 前身の RFC 0008（*Object and Embedded Image Stream Candidates*）では未解読ストリーム候補（`Status: Diagnostic only`）として記録されていたが、本仕様はこれらオブジェクト枠の内部バイナリ構造および抽出・整流化プロトコルを確定・標準化するものである。
 

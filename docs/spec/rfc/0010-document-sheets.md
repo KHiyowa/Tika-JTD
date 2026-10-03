@@ -6,7 +6,7 @@ Observed: 2026-09-20
 
 ## Summary
 
-Ichitaro (Justsystem Ichitaro) document files (JTD / JTT) support multi-sheet documents where multiple documents, tables, or notes are stored within a single file in a tabbed interface.
+Ichitaro (JustSystems Ichitaro) document files (JTD / JTT) support multi-sheet documents where multiple documents, tables, or notes are stored within a single file in a tabbed interface.
 
 While single-sheet documents store their main body text stream under the root CFB path `/DocumentText`, multi-sheet documents organize content as follows:
 - The root `/DocItemInfo` stream contains metadata for each sheet (sheet name, original file path, internal storage identifiers, GUIDs, etc.).
@@ -80,3 +80,11 @@ WASM bindings (`HwpDocument`) expose:
   ]
   ```
 - `doc.getSheetPlainText(index: number): string | undefined`
+
+## Apache Tika SAX Projection Contract (v0.3.0 Established)
+
+In integration with Apache Tika 4's `ContentHandler` pipeline, multi-sheet documents are structured with the following SAX event encapsulation:
+- Each sheet is delimited by a `<div class="sheet">` container element, prefixed with an `<h2>{Sheet Name}</h2>` header.
+- The sheet's body text, reconstructed table markup, and sheet-specific footnotes (`<p>{Footnote}</p>`) are enclosed within this container.
+- Ordering contracts across sheets and within sheets remain invariant (co-specified with RFC 0013).
+- If sheet metadata reading fails, the parser safely falls back to flat single-node plain-text extraction.

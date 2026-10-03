@@ -53,6 +53,34 @@ object DocumentTextParser {
     private const val CONTEXT_ZERO = 0x0000
     private const val CONTEXT_SKIPPED_FLAG = 0x0001
 
+    // インライン規則領域マーカー（0xFE00–0xFE0F）。FE10 以降（縦書き Presentation Forms 等）
+    // は正当テキストなので対象外。
+    internal fun isInlineRuleRegionMarker(code: Int): Boolean = code in 0xFE00..0xFE0F
+
+    // 規則領域のテキスト再開点探索上限（語）。32768 語 = 64 KiB。
+    private const val INLINE_RULE_REGION_MAX_SPAN_WORDS = 32768
+    // 再開点とみなす連続可視テキスト語数。
+    private const val INLINE_RULE_REGION_RESUME_RUN_WORDS = 2
+
+    // 可視テキスト語判定（規則領域再開点検出用）: CJK 漢字・仮名・CJK 記号・全角半角形態・
+    // ASCII printable・空白。0xFE00–0xFE0F は除外。
+    private fun isPlausibleVisibleTextWord(code: Int): Boolean =
+        ((code in 0x3000..0x9FFF || code in 0xFF01..0xFF5E || code in 0x21..0x7E || code == 0x20) &&
+            !isInlineRuleRegionMarker(code))
+
+    // units[from] が規則領域マーカーのとき、領域を跨いだ再開点を返す。
+    internal fun inlineRuleRegionResume(units: IntArray, from: Int, unitLimit: Int): Int? {
+        val spanEnd = min(from + INLINE_RULE_REGION_MAX_SPAN_WORDS, min(unitLimit, units.size))
+        var index = from + 1
+        while (index + INLINE_RULE_REGION_RESUME_RUN_WORDS <= spanEnd) {
+            if ((0 until INLINE_RULE_REGION_RESUME_RUN_WORDS).all { isPlausibleVisibleTextWord(units[index + it]) }) {
+                return index
+            }
+            index++
+        }
+        return null
+    }
+
     /**
      * DocumentText ストリームを解析する。Rust `parse_document_text` と同一挙動。
      */
@@ -134,6 +162,13 @@ object DocumentTextParser {
             }
 
             if (readingText) {
+                if (isInlineRuleRegionMarker(code)) {
+                    val resume = inlineRuleRegionResume(units, index, unitLimit)
+                    if (resume != null) {
+                        index = resume
+                        continue
+                    }
+                }
                 if (isControlBoundary(code) || isInvalidScalar(code)) {
                     pushRun(elements, run)
                     elements.add(DocumentTextElement.ControlBoundary(code))
@@ -599,7 +634,7 @@ object DocumentTextParser {
 
     // 自動番号付けカウンタ。Rust `NumberingState` と同一フィールド構成。
     // parseDocumentText 内で1コンテナ1個を生成し、0x001f run 開始時のたびに渡す。
-    private class NumberingState {
+    internal class NumberingState {
         var chapter: Int = 0
         var section: Int = 0
         var subsection: Int = 0
@@ -631,7 +666,7 @@ object DocumentTextParser {
     // - 0x00a3 0x0002 <style>  → スタイル種別（見出し 1 / 箇条書き 2-4 / 丸数字 8）
     // - 0x0050 0x0002 <level>  → 階層（style 1 の見出し 1-3 / style 8 の丸数字階層）
     // - 0x00a3 0x0002 <style> 0x7fff → 箇条書きの restart マーク（カウンタを 1 に戻す）
-    private fun paragraphHeaderPrefix(
+    internal fun paragraphHeaderPrefix(
         units: IntArray,
         markerIndex: Int,
         state: NumberingState,
